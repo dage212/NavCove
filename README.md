@@ -1,4 +1,4 @@
-# 🐬 SQLAdmin — 网页版数据库管理工具
+# 🐬 SqlSecuriteClient — 网页版数据库管理工具
 
 类 Navicat 的网页版数据库管理工具，支持 MySQL 连接、库/表浏览、SQL 执行、CSV 导入导出。
 
@@ -11,7 +11,7 @@
 ## 目录结构
 
 ```
-sqlAdmin/
+SqlSecuriteClient/
 ├── server/                # 后端 Koa 服务
 │   ├── app.js             # 入口（含静态资源托管 + SPA 回退）
 │   ├── config.js          # 默认连接配置（本机 root 无密码）
