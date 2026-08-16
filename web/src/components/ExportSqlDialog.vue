@@ -10,7 +10,7 @@
     destroy-on-close
   >
     <el-form label-width="1px" class="export-sql-form">
-      <div style="font-size:13px;color:#4e5969;margin-bottom:10px;">
+      <div style="font-size:13px;color:#64748B;margin-bottom:10px;">
         <span v-if="kind === 'database'">导出范围：</span>
         <span v-else>导出表：</span>
         <el-tag size="small" style="margin-left:6px;">{{ scopeLabel }}</el-tag>

@@ -1,5 +1,5 @@
 {
-  "name": "sqladmin-server",
+  "name": "navcove-server",
   "version": "1.0.0",
   "description": "Web-based database management tool (Navicat-like) - backend",
   "main": "app.js",

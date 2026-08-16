@@ -45,11 +45,18 @@ app.use(async (ctx) => {
   }
 });
 
+// 端口：支持动态分配（PORT=0）由 Electron 主进程读取
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`[sqlAdmin] 服务已启动: http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  const addr = server.address();
+  const actualPort = addr && typeof addr === 'object' ? addr.port : PORT;
+  console.log(`[sqlAdmin] 服务已启动: http://localhost:${actualPort}`);
+  // 通过 IPC 通知 Electron 主进程实际端口
+  if (process.send) {
+    process.send({ type: 'server-ready', port: actualPort });
+  }
 });
 
 app.on('error', (err) => {
-  console.error('[sqlAdmin][error]', err.message);
+  console.error('[NavCove][error]', err.message);
 });

@@ -4,7 +4,7 @@ const http = axios.create({ baseURL: '/api', timeout: 60000 });
 
 // 初始化 token
 const _initToken = () => {
-  const t = localStorage.getItem('sqladmin_token');
+  const t = localStorage.getItem('navcove_token');
   if (t) http.defaults.headers.common['Authorization'] = 'Bearer ' + t;
 };
 _initToken();
@@ -28,14 +28,14 @@ export const api = {
   // 认证
   login: (username, password) => http.post('/auth/login', { username, password }).then((data) => {
     if (data.token) {
-      localStorage.setItem('sqladmin_token', data.token);
+      localStorage.setItem('navcove_token', data.token);
       http.defaults.headers.common['Authorization'] = 'Bearer ' + data.token;
     }
     return data;
   }),
   logout: () => {
-    const token = localStorage.getItem('sqladmin_token');
-    localStorage.removeItem('sqladmin_token');
+    const token = localStorage.getItem('navcove_token');
+    localStorage.removeItem('navcove_token');
     delete http.defaults.headers.common['Authorization'];
     return http.post('/auth/logout', { token });
   },

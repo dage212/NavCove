@@ -92,7 +92,7 @@ async function onOpen() {
   if (!cmInstance) {
     cmInstance = CodeMirror.fromTextArea(editorRef.value, {
       mode: 'text/x-mysql',
-      theme: 'sqladmin',
+      theme: 'navcove',
       lineNumbers: true,
       indentUnit: 2,
       smartIndent: true,

@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
   plugins: [vue()],
+  // 生产构建使用相对路径，便于 Electron 直接加载本地文件
+  base: './',
   server: {
     port: 5173,
     proxy: {

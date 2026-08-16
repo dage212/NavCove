@@ -1,9 +1,20 @@
 <template>
+  <div class="app-root">
+    <Title-bar
+      :logged-in="loggedIn"
+      :sidebar-collapsed="sidebarCollapsed"
+      :user="user"
+      :user-initial="userInitial"
+      @toggle-sidebar="toggleSidebar"
+      @open-conn="openConnDialog"
+      @logout="handleUserCommand('logout')"
+    />
   <!-- 登录页 -->
   <div v-if="!loggedIn" class="login-page">
     <div class="login-left">
-      <div class="logo-big">🐬</div>
-      <h1>SQLAdmin</h1>
+      <img v-if="loginLogoSrc" :src="loginLogoSrc" class="logo-big" alt="NavCove Logo" />
+      <div v-else class="logo-big">🐬</div>
+      <h1>NavCove</h1>
       <div class="sub-title">企业级数据库管理平台</div>
       <div class="features">
         <div class="ft"><span class="ft-icon"><el-icon><Coin /></el-icon></span>支持 MySQL 多数据库连接与管理</div>
@@ -11,7 +22,7 @@
         <div class="ft"><span class="ft-icon"><el-icon><Edit /></el-icon></span>表数据可视化编辑 · 暂存确认 · 批量导入导出</div>
         <div class="ft"><span class="ft-icon"><el-icon><Lock /></el-icon></span>安全鉴权 · 数据操作留痕</div>
       </div>
-      <div class="copyright">© 2026 SQLAdmin · Powered by Vue 3 + Koa</div>
+      <div class="copyright">© 2026 NavCove · Powered by Vue 3 + Koa</div>
     </div>
     <div class="login-right">
       <div class="login-box">
@@ -40,40 +51,29 @@
 
   <!-- 主界面 -->
   <div v-else class="app-layout" @contextmenu.prevent @click="closeContextMenu">
-    <header class="app-header">
-      <div class="logo">
-        <el-button class="collapse-btn" text size="small" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
-          <el-icon size="18"><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
-        </el-button>
-        <span class="logo-icon">🐬</span>
-        <span>SQLAdmin</span>
-        <span class="sub">· 数据库管理工具</span>
-        <el-button size="small" type="primary" class="new-conn-btn" @click="openConnDialog">
-          <el-icon><Connection /></el-icon><span style="margin-left:4px">新建连接</span>
-        </el-button>
+    <!-- 顶级连接选项卡条 -->
+    <div v-if="connTabs.length" class="conn-tabs-bar">
+      <div class="conn-tabs-scroll">
+        <div
+          v-for="c in connTabs"
+          :key="c.id"
+          class="conn-tab"
+          :class="{ active: c.id === activeConnId }"
+          @click="switchConnTab(c.id)"
+        >
+          <el-icon class="conn-tab-icon"><Coin /></el-icon>
+          <span class="conn-tab-name">{{ c.name }}</span>
+          <el-icon class="conn-tab-close" @click.stop="closeConnTab(c.id)"><Close /></el-icon>
+        </div>
       </div>
-      <div class="header-actions">
-        <el-dropdown trigger="click" @command="handleUserCommand">
-          <div class="user-info dropdown-trigger">
-            <span class="user-avatar">{{ userInitial }}</span>
-            <span class="user-name">{{ user.name || user.username }}</span>
-            <el-icon class="caret"><ArrowDown /></el-icon>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item disabled style="color:#94A3B8">
-                <el-icon><UserFilled /></el-icon>
-                <span style="margin-left:6px">{{ user.name }} ({{ user.username }})</span>
-              </el-dropdown-item>
-              <el-dropdown-item divided command="logout">
-                <el-icon><SwitchButton /></el-icon>
-                <span style="margin-left:6px">退出登录</span>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </header>
+      <el-button class="conn-tab-add" text @click="openConnDialog" title="新建连接">
+        <el-icon><Plus /></el-icon>
+      </el-button>
+    </div>
+    <div v-else class="conn-tabs-empty">
+      <span class="empty-hint">尚未连接任何数据库</span>
+      <el-button type="primary" size="small" @click="openConnDialog">新建连接</el-button>
+    </div>
 
     <div class="app-body">
       <!-- 左侧库表树 -->
@@ -99,6 +99,7 @@
           <el-tree
             v-else
             ref="treeRef"
+            :key="activeConnId"
             :data="treeData"
             :props="treeProps"
             node-key="key"
@@ -274,10 +275,11 @@
       @done="onExportSqlDone"
     />
   </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import CodeMirror from 'codemirror';
 import 'codemirror/lib/codemirror.css';
@@ -295,6 +297,7 @@ import CreateTableDialog from './components/CreateTableDialog.vue';
 import CreateDatabaseDialog from './components/CreateDatabaseDialog.vue';
 import ExportSqlDialog from './components/ExportSqlDialog.vue';
 import StructureView from './components/StructureView.vue';
+import TitleBar from './components/TitleBar.vue';
 
 // ============ 登录 ============
 const loggedIn = ref(false);
@@ -302,6 +305,7 @@ const user = reactive({ username: '', name: '' });
 const loginForm = reactive({ username: 'admin', password: '123456' });
 const loginLoading = ref(false);
 const userInitial = computed(() => (user.name || user.username || 'A').charAt(0).toUpperCase());
+const loginLogoSrc = '/icon.png';
 
 async function handleLogin() {
   if (!loginForm.username || !loginForm.password) { ElMessage.warning('请输入用户名和密码'); return; }
@@ -312,9 +316,7 @@ async function handleLogin() {
     user.name = data.name;
     loggedIn.value = true;
     ElMessage.success(`欢迎，${data.name || data.username}`);
-    // 登录后自动连接
-    await nextTick();
-    initEditor();
+    // 登录后自动连接（initEditor 由 watch(editorRef) 兜底触发）
     try {
       const def = await api.getDefaultConnection();
       if (def) {
@@ -340,10 +342,8 @@ async function handleLogout() {
   try { await api.logout(); } catch (e) {}
   loggedIn.value = false;
   Object.assign(user, { username: '', name: '' });
-  connected.value = false;
-  Object.assign(connection, { id: '', name: '', type: 'mysql', host: '', port: 3306, user: '', password: '' });
-  databases.value = []; treeData.value = [];
-  resultTabs.value = [];
+  connTabs.value = [];
+  activeConnId.value = '';
   ElMessage.success('已退出登录');
 }
 
@@ -355,7 +355,7 @@ onMounted(async () => {
     user.name = data.name;
     loggedIn.value = true;
     await nextTick();
-    initEditor();
+    // initEditor 由下方 watch(editorRef) 兜底触发，确保 textarea 真正渲染后再初始化
     // 自动用默认连接
     try {
       const def = await api.getDefaultConnection();
@@ -376,23 +376,34 @@ const editorRef = ref(null);
 let cmInstance = null;
 let editorInited = false;
 
-const connected = ref(false);
+// 多连接选项卡：每个连接一份独立状态
+const connTabs = ref([]);
+const activeConnId = ref('');
+const curConn = computed(() => connTabs.value.find((c) => c.id === activeConnId.value) || null);
+
+// writable computed 代理：所有对 connection/currentDb/resultTabs 等的访问自动落到当前激活的 connTab
+const DEFAULT_CONN = { id: '', name: '', type: 'mysql', host: '', port: 3306, user: '', password: '' };
+const connection = computed({
+  get: () => (curConn.value ? curConn.value.connection : DEFAULT_CONN),
+  set: (v) => { if (curConn.value) curConn.value.connection = v; }
+});
+const databases = computed({ get: () => curConn.value?.databases ?? [], set: (v) => { if (curConn.value) curConn.value.databases = v; } });
+const databaseSelect = ref('');
+const currentDb = computed({ get: () => curConn.value?.currentDb ?? '', set: (v) => { if (curConn.value) curConn.value.currentDb = v; } });
+const currentTable = computed({ get: () => curConn.value?.currentTable ?? '', set: (v) => { if (curConn.value) curConn.value.currentTable = v; } });
+const treeData = computed({ get: () => curConn.value?.treeData ?? [], set: (v) => { if (curConn.value) curConn.value.treeData = v; } });
+const expandedKeys = computed({ get: () => curConn.value?.expandedKeys ?? [], set: (v) => { if (curConn.value) curConn.value.expandedKeys = v; } });
+const resultTabs = computed({ get: () => curConn.value?.resultTabs ?? [], set: (v) => { if (curConn.value) curConn.value.resultTabs = v; } });
+const activeTab = computed({ get: () => curConn.value?.activeTab ?? '', set: (v) => { if (curConn.value) curConn.value.activeTab = v; } });
+const resultMeta = computed({ get: () => curConn.value?.resultMeta ?? '', set: (v) => { if (curConn.value) curConn.value.resultMeta = v; } });
+const connected = computed(() => connTabs.value.length > 0 && !!curConn.value);
+
 const sidebarCollapsed = ref(false);
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; }
-const connection = reactive({ id: '', name: '', type: 'mysql', host: '', port: 3306, user: '', password: '' });
-const databases = ref([]);
-const databaseSelect = ref('');
-const currentDb = ref('');
-const currentTable = ref('');
-const treeData = ref([]);
-const expandedKeys = ref([]);
 const treeRef = ref(null);
 const loading = ref(false);
 
 const editorHeight = ref(220);
-const resultTabs = ref([]);
-const activeTab = ref('');
-const resultMeta = ref('');
 const hasResultRows = computed(() => {
   const tab = resultTabs.value.find((t) => t.id === activeTab.value);
   return !!(tab && tab.rows && tab.rows.length);
@@ -407,7 +418,7 @@ function initEditor() {
   editorInited = true;
   cmInstance = CodeMirror.fromTextArea(editorRef.value, {
     mode: 'text/x-mysql',
-    theme: 'sqladmin',
+    theme: 'navcove',
     lineNumbers: true,
     indentUnit: 2,
     smartIndent: true,
@@ -424,7 +435,26 @@ function initEditor() {
     }
   });
   cmInstance.setValue('-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
+  // 确保正确计算尺寸（异步渲染场景下 fromTextArea 后可能高度为 0）
+  setTimeout(() => { try { cmInstance && cmInstance.refresh(); } catch (e) {} }, 0);
 }
+
+// 登录状态变化时初始化编辑器（loggedIn true → DOM 渲染 textarea → nextTick 后初始化）
+watch(loggedIn, (val) => {
+  if (val) {
+    nextTick(() => initEditor());
+  } else {
+    // 登出时重置编辑器状态，确保下次登录重新初始化
+    editorInited = false;
+    cmInstance = null;
+  }
+});
+// 兜底：textarea 渲染后立即初始化编辑器
+watch(editorRef, (el) => {
+  if (el && loggedIn.value && !editorInited) {
+    nextTick(() => initEditor());
+  }
+});
 
 function openConnDialog() { connDialogVisible.value = true; }
 
@@ -438,16 +468,26 @@ function pickDefaultDb(dbs, preferDb) {
 }
 
 async function onConnected(conn) {
-  Object.assign(connection, conn);
-  connected.value = true;
+  // 保存当前 tab 的 SQL 内容（如果有）
+  saveCurrentSql();
+  // 创建新连接选项卡
+  const newTab = {
+    id: conn.id,
+    name: conn.name || conn.host || `连接${connTabs.value.length + 1}`,
+    connection: { ...conn },
+    databases: [],
+    currentDb: '',
+    currentTable: '',
+    treeData: [],
+    expandedKeys: [],
+    resultTabs: [],
+    activeTab: '',
+    resultMeta: '',
+    sql: ''
+  };
+  connTabs.value.push(newTab);
+  activeConnId.value = newTab.id;
   connDialogVisible.value = false;
-  // 清空上次连接残留
-  resultTabs.value = [];
-  activeTab.value = '';
-  resultMeta.value = '';
-  expandedKeys.value = [];
-  currentDb.value = '';
-  currentTable.value = '';
 
   await loadDatabases();
   await refreshTree();
@@ -466,23 +506,20 @@ async function onConnected(conn) {
   // 加载该库的表
   let tables = [];
   try {
-    tables = await api.listTables(connection.id, db);
+    tables = await api.listTables(connection.value.id, db);
   } catch (e) {}
   // 填充编辑器默认 SQL（根据是否有表）
-  if (cmInstance) {
-    if (tables.length) {
-      const t = tables[0].name;
-      cmInstance.setValue(`USE \`${db}\`;\nSELECT * FROM \`${t}\` LIMIT 50;\n`);
-    } else {
-      cmInstance.setValue(`USE \`${db}\`;\nSHOW TABLES;\n`);
-    }
-  }
+  const defaultSql = tables.length
+    ? `USE \`${db}\`;\nSELECT * FROM \`${tables[0].name}\` LIMIT 50;\n`
+    : `USE \`${db}\`;\nSHOW TABLES;\n`;
+  newTab.sql = defaultSql;
+  if (cmInstance) cmInstance.setValue(defaultSql);
   // 如果有表，自动打开第一张表的数据
   if (tables.length) {
     const first = tables[0];
     currentTable.value = first.name;
     openResultTab({
-      kind: 'table', connId: connection.id, database: db, table: first.name, label: first.name
+      kind: 'table', connId: connection.value.id, database: db, table: first.name, label: first.name
     });
     // 关键：lazy 模式下不要给 data.children 赋值（el-tree 会和 store 内部 childNodes 重复显示）
     // 通过 store.append 把表节点直接塞进 el-tree 内部 store，并标记 loaded=true 避免后续展开时再调 loadNode
@@ -508,13 +545,49 @@ async function onConnected(conn) {
   }
 }
 
+// 保存当前 cmInstance 内容到当前 connTab.sql
+function saveCurrentSql() {
+  if (cmInstance && curConn.value) {
+    curConn.value.sql = cmInstance.getValue();
+  }
+}
+
+// 切换连接选项卡
+function switchConnTab(id) {
+  if (id === activeConnId.value) return;
+  saveCurrentSql();
+  activeConnId.value = id;
+  // 切换后加载目标 tab 的 sql 到编辑器
+  nextTick(() => {
+    if (cmInstance && curConn.value) {
+      cmInstance.setValue(curConn.value.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
+    }
+  });
+}
+
+// 关闭连接选项卡
+function closeConnTab(id) {
+  const idx = connTabs.value.findIndex((c) => c.id === id);
+  if (idx < 0) return;
+  // 如果要断开后端连接可以在这里调 api.disconnect(id)
+  connTabs.value.splice(idx, 1);
+  if (activeConnId.value === id) {
+    activeConnId.value = connTabs.value[0]?.id || '';
+    nextTick(() => {
+      if (cmInstance && curConn.value) {
+        cmInstance.setValue(curConn.value.sql || '');
+      }
+    });
+  }
+}
+
 async function loadDatabases() {
-  try { databases.value = await api.listDatabases(connection.id); }
+  try { databases.value = await api.listDatabases(connection.value.id); }
   catch (e) { ElMessage.error('获取数据库列表失败: ' + e.message); }
 }
 
 async function refreshTree() {
-  const dbs = await api.listDatabases(connection.id);
+  const dbs = await api.listDatabases(connection.value.id);
   databases.value = dbs;
   treeData.value = dbs.map((d) => ({
     key: 'db:' + d, label: d, type: 'database', name: d, children: []
@@ -525,7 +598,7 @@ async function loadNode(node, resolve) {
   const data = node.data;
   if (data.type === 'database') {
     try {
-      const tables = await api.listTables(connection.id, data.name);
+      const tables = await api.listTables(connection.value.id, data.name);
       resolve(tables.map((t) => ({
         key: 'tb:' + data.name + '.' + t.name,
         label: t.name, type: 'table', name: t.name, database: data.name, rows: t.rows, isLeaf: true
@@ -554,7 +627,7 @@ function viewTableData(data) {
   databaseSelect.value = data.database;
   currentTable.value = data.name;
   openResultTab({
-    kind: 'table', connId: connection.id, database: data.database, table: data.name, label: data.name
+    kind: 'table', connId: connection.value.id, database: data.database, table: data.name, label: data.name
   });
 }
 
@@ -574,7 +647,7 @@ async function runSql(selectedOnly = false) {
   loading.value = true;
   resultMeta.value = '';
   try {
-    const results = await api.query(connection.id, currentDb.value || databaseSelect.value, sql);
+    const results = await api.query(connection.value.id, currentDb.value || databaseSelect.value, sql);
     if (!results.length) { ElMessage.success('执行完成'); return; }
     const tabs = results.map((r, i) => {
       if (r.type === 'select') {
@@ -655,7 +728,7 @@ function triggerDownload(url, filename) {
 function exportTable(data) {
   if (!data || !data.name) return;
   const db = data.database || currentDb.value;
-  const url = api.exportTableUrl(connection.id, db, data.name);
+  const url = api.exportTableUrl(connection.value.id, db, data.name);
   triggerDownload(url, `${db}_${data.name}.csv`);
   ElMessage.success('开始导出 ' + data.name);
 }
@@ -671,7 +744,7 @@ async function exportCurrentResult() {
     }
     const sql = cmInstance && cmInstance.getValue();
     if (!sql) { ElMessage.warning('无可导出内容'); return; }
-    const blob = await api.exportQueryCsv(tab.connId || connection.id, tab.database || currentDb.value, sql);
+    const blob = await api.exportQueryCsv(tab.connId || connection.value.id, tab.database || currentDb.value, sql);
     downloadBlob(blob, 'query_result.csv');
     ElMessage.success('导出成功');
   } catch (e) { ElMessage.error('导出失败: ' + e.message); }
@@ -768,7 +841,7 @@ function onTableCreated(payload) {
     databaseSelect.value = db;
     currentTable.value = table;
     openResultTab({
-      kind: 'table', connId: connection.id, database: db, table, label: table
+      kind: 'table', connId: connection.value.id, database: db, table, label: table
     });
   }
 }
@@ -791,7 +864,7 @@ async function onDatabaseCreated(payload) {
   databaseSelect.value = newDb;
   const dbKey = 'db:' + newDb;
   try {
-    const tables = await api.listTables(connection.id, newDb);
+    const tables = await api.listTables(connection.value.id, newDb);
     const tree = treeRef.value;
     if (tree) {
       const dbNode = tree.getNode(dbKey);
@@ -814,7 +887,7 @@ async function onDatabaseCreated(payload) {
       const first = tables[0];
       currentTable.value = first.name;
       openResultTab({
-        kind: 'table', connId: connection.id, database: newDb, table: first.name, label: first.name
+        kind: 'table', connId: connection.value.id, database: newDb, table: first.name, label: first.name
       });
     } else {
       if (cmInstance) cmInstance.setValue(`USE \`${newDb}\`;\nSHOW TABLES;\n`);
@@ -927,7 +1000,7 @@ async function handleCreateDatabase() {
 // 编辑数据库（修改字符集）
 async function handleEditDatabase(data) {
   try {
-    const info = await api.getDatabaseInfo(connection.id, data.name);
+    const info = await api.getDatabaseInfo(connection.value.id, data.name);
     const cur = info?.charset || 'utf8mb4';
     const res = await ElMessageBox.prompt('请输入默认字符集', `编辑数据库「${data.name}」`, {
       confirmButtonText: '确定', cancelButtonText: '取消',
@@ -937,7 +1010,7 @@ async function handleEditDatabase(data) {
     });
     const charset = res.value.trim();
     if (charset === cur) { ElMessage.info('字符集未变化'); return; }
-    await api.alterDatabase(connection.id, data.name, charset);
+    await api.alterDatabase(connection.value.id, data.name, charset);
     ElMessage.success(`数据库「${data.name}」字符集已更新为 ${charset}`);
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
@@ -953,7 +1026,7 @@ async function handleDropDatabase(data) {
       '危险操作：删除数据库',
       { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
     );
-    await api.dropDatabase(connection.id, data.name);
+    await api.dropDatabase(connection.value.id, data.name);
     ElMessage.success(`数据库「${data.name}」已删除`);
     // 关闭该库下所有 tab
     resultTabs.value = resultTabs.value.filter((t) => t.database !== data.name);
@@ -969,7 +1042,7 @@ async function handleDropDatabase(data) {
 // 库级导入：加载该库表列表，让用户选择目标表
 async function handleDatabaseImport(data) {
   try {
-    const tables = await api.listTables(connection.id, data.name);
+    const tables = await api.listTables(connection.value.id, data.name);
     if (!tables.length) { ElMessage.warning('该库下暂无表，请先新建表'); return; }
     const tableNames = tables.map((t) => t.name);
     // 用 ElMessageBox.prompt 不便选表，这里直接打开导入对话框并传入可选表列表
@@ -985,12 +1058,12 @@ async function handleDatabaseImport(data) {
 // 库级导出：导出该库所有表为 CSV（流式，逐表串行触发）
 async function handleDatabaseExport(data) {
   try {
-    const tables = await api.listTables(connection.id, data.name);
+    const tables = await api.listTables(connection.value.id, data.name);
     if (!tables.length) { ElMessage.warning('该库下暂无表可导出'); return; }
     ElMessage.success(`开始导出 ${tables.length} 张表`);
     tables.forEach((t, i) => {
       setTimeout(() => {
-        const url = api.exportTableUrl(connection.id, data.name, t.name);
+        const url = api.exportTableUrl(connection.value.id, data.name, t.name);
         triggerDownload(url, `${data.name}_${t.name}.csv`);
       }, i * 400);
     });
@@ -1010,7 +1083,7 @@ async function handleRenameTable(data) {
     });
     const newName = res.value.trim();
     if (newName === data.name) return;
-    await api.renameTable(connection.id, data.database, data.name, newName);
+    await api.renameTable(connection.value.id, data.database, data.name, newName);
     ElMessage.success(`已重命名为 ${newName}`);
     // 更新可能已打开的 tab
     resultTabs.value.forEach((t) => { if (t.database === data.database && t.table === data.name) t.table = newName; });
@@ -1031,7 +1104,7 @@ async function handleCopyTable(data) {
       inputErrorMessage: '表名只能以字母/下划线开头，含字母数字下划线'
     });
     const dest = res.value.trim();
-    await api.copyTable(connection.id, data.database, data.name, dest);
+    await api.copyTable(connection.value.id, data.database, data.name, dest);
     ElMessage.success(`已复制为 ${dest}`);
     refreshTree();
   } catch (e) {
@@ -1048,7 +1121,7 @@ async function handleTruncateTable(data) {
       '危险操作：清空表',
       { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
     );
-    await api.truncateTable(connection.id, data.database, data.name);
+    await api.truncateTable(connection.value.id, data.database, data.name);
     ElMessage.success(`表「${data.name}」已清空`);
     refreshTree();
   } catch (e) {
@@ -1065,7 +1138,7 @@ async function handleDropTable(data) {
       '危险操作：删除表',
       { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
     );
-    await api.dropTable(connection.id, data.database, data.name);
+    await api.dropTable(connection.value.id, data.database, data.name);
     ElMessage.success(`表「${data.name}」已删除`);
     // 关闭对应 tab
     resultTabs.value = resultTabs.value.filter((t) => !(t.database === data.database && t.table === data.name));

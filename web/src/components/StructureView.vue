@@ -170,7 +170,7 @@ function initCm() {
   if (!sqlRef.value) return;
   cmInstance = CodeMirror.fromTextArea(sqlRef.value, {
     mode: 'text/x-mysql',
-    theme: 'sqladmin',
+    theme: 'navcove',
     lineNumbers: true,
     indentUnit: 2,
     matchBrackets: true,
@@ -211,12 +211,12 @@ onMounted(load);
 <style scoped>
 .structure-view { height:100%; overflow:auto; padding:12px; }
 .sv-inner { display:flex; flex-direction:column; gap:12px; }
-.sv-meta { display:flex; align-items:center; gap:10px; padding:8px 12px; background:#F0F5FF; border-radius:6px; font-size:13px; color:#4e5969; }
-.sv-title { font-weight:600; color:#1D2129; font-size:14px; }
-.sv-meta-item { color:#4e5969; }
-.sv-meta-item b { color:#1D2129; margin:0 2px; }
-.sv-section { border:1px solid #E5E6EB; border-radius:6px; overflow:hidden; }
-.sv-sec-title { display:flex; align-items:center; gap:6px; padding:8px 12px; background:#FAFAFA; border-bottom:1px solid #E5E6EB; font-size:13px; color:#1D2129; font-weight:500; }
+.sv-meta { display:flex; align-items:center; gap:10px; padding:8px 12px; background:#F1F5F9; border-radius:6px; font-size:13px; color:#64748B; }
+.sv-title { font-weight:600; color:#111827; font-size:14px; }
+.sv-meta-item { color:#64748B; }
+.sv-meta-item b { color:#111827; margin:0 2px; }
+.sv-section { border:1px solid #E5E7EB; border-radius:6px; overflow:hidden; }
+.sv-sec-title { display:flex; align-items:center; gap:6px; padding:8px 12px; background:#FAFAFA; border-bottom:1px solid #E5E7EB; font-size:13px; color:#111827; font-weight:500; }
 .sv-sql-textarea { display:none; }
 .sv-section :deep(.CodeMirror) { height:auto; min-height:220px; max-height:420px; border:0; }
 .sv-section :deep(.CodeMirror-scroll) { min-height:220px; max-height:420px; }

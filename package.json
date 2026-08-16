@@ -1,0 +1,76 @@
+{
+  "name": "navcove",
+  "version": "1.0.0",
+  "description": "NavCove - 数据库管理工具（Electron 桌面版）",
+  "main": "electron/main.js",
+  "author": "NavCove",
+  "license": "MIT",
+  "scripts": {
+    "dev:web": "cd web && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev": "concurrently -k -n web,server,electron -c cyan,magenta,green \"npm run dev:web\" \"npm run dev:server\" \"wait-on tcp:5173 && npm run dev:electron\"",
+    "build:web": "cd web && npm run build",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "pack": "npm run build:web && electron-builder --dir",
+    "dist": "npm run build:web && electron-builder",
+    "dist:win": "npm run build:web && electron-builder --win nsis portable",
+    "dist:mac": "npm run build:web && electron-builder --mac dmg zip",
+    "dist:linux": "npm run build:web && electron-builder --linux AppImage deb"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.0.5",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.navcove.app",
+    "productName": "NavCove",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "web/dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Development"
+    },
+    "extraMetadata": {
+      "main": "electron/main.js"
+    }
+  }
+}
