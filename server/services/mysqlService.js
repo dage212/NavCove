@@ -28,14 +28,26 @@ async function listDatabases(connId) {
 // 获取库下所有表
 async function listTables(connId, database) {
   const pool = poolMgr.getPool(connId);
-  const [rows] = await pool.query(
-    `SELECT TABLE_NAME AS name, TABLE_TYPE AS type, TABLE_ROWS AS \`rows\`, ENGINE AS engine, TABLE_COMMENT AS comment
+  const [tables] = await pool.query(
+    `SELECT TABLE_NAME AS name, TABLE_TYPE AS type, ENGINE AS engine, TABLE_COMMENT AS comment
      FROM information_schema.TABLES
      WHERE TABLE_SCHEMA = ?
      ORDER BY TABLE_NAME`,
     [database]
   );
-  return rows;
+  // information_schema.TABLE_ROWS 对 InnoDB 是估算值，且写入后不会立即刷新
+  // （需要 ANALYZE TABLE 才更新），会误导用户。这里改用 SELECT COUNT(*) 取精确行数。
+  // 视图等无法 COUNT 的对象，try/catch 兜底返回 null。
+  const quotedDb = mysqlEscapeId(database);
+  const counts = await Promise.all(tables.map(async (t) => {
+    try {
+      const [r] = await pool.query(`SELECT COUNT(*) AS c FROM ${quotedDb}.${mysqlEscapeId(t.name)}`);
+      return r[0] ? Number(r[0].c) : 0;
+    } catch (e) {
+      return null; // 视图/出错：行数未知
+    }
+  }));
+  return tables.map((t, i) => ({ ...t, rows: counts[i] }));
 }
 
 // 获取表结构
@@ -132,7 +144,91 @@ async function exportQueryCsv(connId, database, sql) {
   }
 }
 
-// 导入 CSV 到指定表（返回插入行数）
+// 流式导出表数据为 CSV（大数据量方案）
+// 返回一个可读流：BOM + CSV 行流，调用方直接 pipe 到 HTTP 响应
+function exportTableCsvStream(connId, database, table, { limit } = {}) {
+  // 取连接配置（同时校验连接是否存在）
+  const meta = poolMgr.getMeta(connId);
+  // 必须用 mysql2 回调版（非 /promise）：promise 版的 conn.query 返回 Promise，没有 .stream()
+  const mysql = require('mysql2');
+  const { PassThrough, Transform } = require('stream');
+  const { format } = require('@fast-csv/format');
+
+  const quotedDb = mysqlEscapeId(database);
+  const quotedTable = mysqlEscapeId(table);
+  let sql = `SELECT * FROM ${quotedDb}.${quotedTable}`;
+  if (limit) sql += ` LIMIT ${Number(limit)}`;
+
+  const out = new PassThrough();
+
+  // 用独立 raw 连接做流式查询（不入池，查询结束即 end）
+  const rawConn = mysql.createConnection({
+    host: meta.host,
+    port: meta.port || 3306,
+    user: meta.user,
+    password: meta.password == null ? '' : meta.password,
+    database: database, // 直接连目标库，省去 changeUser
+    dateStrings: true,
+    supportBigNumbers: true,
+    bigNumberStrings: true
+  });
+
+  let finished = false;
+  function cleanup() {
+    if (finished) return;
+    finished = true;
+    try { rawConn.end(); } catch (e) {}
+  }
+
+  // 连接级错误（如密码错误、连不上）会从 rawConn 的 'error' 事件抛出
+  rawConn.on('error', (err) => {
+    cleanup();
+    out.destroy(err);
+  });
+
+  // BOM 用 Transform 注入到 CSV 第一块数据之前
+  // 这样查询失败时（未产出任何行）不会提前写 BOM，Koa 仍可返回错误响应
+  const bomInserter = new Transform({
+    transform(chunk, enc, cb) {
+      if (!this._bomDone) {
+        this.push('\ufeff');
+        this._bomDone = true;
+      }
+      this.push(chunk);
+      cb();
+    }
+  });
+
+  // mysql2 回调版：conn.query(sql) 同步返回 Query 对象，.stream() 返回行流
+  const queryStream = rawConn.query(sql).stream();
+  const csvStream = format({ headers: true });
+
+  queryStream.on('error', (err) => {
+    cleanup();
+    // destroy 下游，传播错误
+    csvStream.destroy(err);
+  });
+  csvStream.on('error', (err) => {
+    cleanup();
+    bomInserter.destroy(err);
+  });
+  bomInserter.on('error', (err) => {
+    cleanup();
+    out.destroy(err);
+  });
+
+  queryStream.pipe(csvStream).pipe(bomInserter).pipe(out);
+
+  out.on('finish', cleanup);
+  out.on('close', () => {
+    try { queryStream.destroy(); } catch (e) {}
+    cleanup();
+  });
+
+  return out;
+}
+
+// 导入 CSV 到指定表（内存版，仍保留用于兼容小文件文本导入）
 async function importTableCsv(connId, database, table, csvText, { replace = false } = {}) {
   const { parse } = require('fast-csv');
   const pool = poolMgr.getPool(connId);
@@ -154,11 +250,113 @@ async function importTableCsv(connId, database, table, csvText, { replace = fals
 
   const columns = Object.keys(rows[0]);
   const colSql = columns.map(mysqlEscapeId).join(', ');
-  // mysql2 批量插入：VALUES ? 配合二维数组
   const sql = `${replace ? 'REPLACE' : 'INSERT'} INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
   const values = rows.map((r) => columns.map((c) => (r[c] === '' || r[c] == null ? null : r[c])));
   const [res] = await pool.query(sql, [values]);
   return { inserted: res.affectedRows, columns, count: rows.length };
+}
+
+/**
+ * 流式导入 CSV 文件（大数据量 + 断点续传文件合并后调用）
+ * @param {string} connId  连接 ID
+ * @param {string} database 目标库
+ * @param {string} table   目标表
+ * @param {string} filePath CSV 绝对路径（切片合并后的文件）
+ * @param {object} opt
+ * @param {boolean} opt.replace 是否 REPLACE 模式
+ * @param {number} opt.batchSize 每批行数，默认 1000
+ * @returns {Promise<{inserted:number,count:number,columns:string[]}>}
+ */
+function importCsvFileStream(connId, database, table, filePath, { replace = false, batchSize = 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const pool = poolMgr.getPool(connId);
+    const quotedDb = mysqlEscapeId(database);
+    const quotedTable = mysqlEscapeId(table);
+    const fs = require('fs');
+    const { parse } = require('fast-csv');
+
+    const parser = parse({ headers: true, ignoreEmpty: true, trim: true });
+    const readStream = fs.createReadStream(filePath, 'utf8');
+
+    let columns = null;
+    let count = 0;          // 总行数
+    let inserted = 0;       // 累计受影响行数
+    let buffer = [];        // 当前批次缓存
+    let activeTask = null;  // 当前正在执行的 INSERT Promise（串行防并发）
+    let aborted = false;
+    let parserEnded = false;
+    let insertSql = null;
+
+    function buildInsertSql(cols) {
+      const colSql = cols.map(mysqlEscapeId).join(', ');
+      return `${replace ? 'REPLACE' : 'INSERT'} INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
+    }
+
+    function flushBatch(releaseConn, conn) {
+      if (!buffer.length) return Promise.resolve();
+      const rows = buffer;
+      buffer = [];
+      const values = rows.map((r) => columns.map((c) => (r[c] === '' || r[c] == null ? null : r[c])));
+      const sql = insertSql;
+      activeTask = (releaseConn && conn && conn.query)
+        ? conn.query(sql, [values]).then(([res]) => { inserted += res.affectedRows; })
+        : pool.query(sql, [values]).then(([res]) => { inserted += res.affectedRows; });
+      return activeTask;
+    }
+
+    // 用独立连接以保证同一事务/同一会话（池里不同连接不影响）
+    let sharedConn;
+    let poolCleanup = null;
+
+    parser.on('error', (err) => {
+      aborted = true;
+      reject(err);
+    });
+
+    parser.on('headers', (headers) => {
+      columns = headers.map((h) => String(h).replace(/^\ufeff/, '')); // 兼容 BOM
+      insertSql = buildInsertSql(columns);
+    });
+
+    parser.on('data', async (row) => {
+      if (aborted) return;
+      count++;
+      buffer.push(row);
+      if (buffer.length >= batchSize) {
+        // 暂停流，等上一批写完
+        parser.pause();
+        try {
+          await flushBatch();
+        } catch (e) {
+          aborted = true;
+          if (sharedConn) try { sharedConn.release(); } catch (e) {}
+          reject(e);
+          return;
+        }
+        parser.resume();
+      }
+    });
+
+    parser.on('end', async () => {
+      parserEnded = true;
+      if (aborted) return;
+      try {
+        // flush 剩余
+        if (buffer.length) await flushBatch();
+        resolve({ inserted, count, columns: columns || [] });
+      } catch (e) {
+        aborted = true;
+        reject(e);
+      }
+    });
+
+    readStream.on('error', (err) => {
+      aborted = true;
+      reject(err);
+    });
+
+    readStream.pipe(parser);
+  });
 }
 
 // --- 工具函数 ---
@@ -440,8 +638,10 @@ module.exports = {
   getTableData,
   executeSql,
   exportTableCsv,
+  exportTableCsvStream,
   exportQueryCsv,
   importTableCsv,
+  importCsvFileStream,
   saveTable,
   updateRow,
   insertRow,

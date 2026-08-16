@@ -42,6 +42,7 @@ export const api = {
   me: () => http.get('/auth/me'),
   // 连接
   getDefaultConnection: () => http.get('/connection/default'),
+  getConnection: (id) => http.get(`/connection/${id}`),
   testConnection: (conn) => http.post('/connection/test', conn),
   connect: (conn) => http.post('/connection/connect', conn),
   disconnect: (id) => http.delete(`/connection/${id}`),
@@ -87,7 +88,15 @@ export const api = {
   exportQueryCsv: (connId, database, sql) =>
     http.post('/export/query', { connId, database, sql }, { responseType: 'blob' }),
   importTable: (connId, database, table, content, replace) =>
-    http.post('/import/table', { connId, database, table, content, replace })
+    http.post('/import/table', { connId, database, table, content, replace }),
+
+  // 切片上传导入（断点续传）
+  importInit: (payload) => http.post('/import/upload/init', payload),
+  // 切片上传使用 FormData（multipart/form-data）：Content-Type 交给浏览器自动生成（带 boundary）
+  importChunk: (formData) => http.post('/import/upload/chunk', formData),
+  importMerge: (payload) => http.post('/import/upload/merge', payload),
+  importCancel: (uploadId) => http.delete(`/import/upload/${uploadId}`)
 };
 
 export default api;
+

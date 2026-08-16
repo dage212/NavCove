@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <!-- 登录页 -->
   <div v-if="!loggedIn" class="login-page">
     <div class="login-left">
@@ -188,7 +188,7 @@
       </main>
     </div>
 
-    <connection-dialog v-model:visible="connDialogVisible" @connected="onConnected" />
+    <connection-dialog v-model:visible="connDialogVisible" :init-conn="connected ? connection : null" @connected="onConnected" />
     <import-dialog v-model:visible="importDialog.visible" :conn="connection" :database="importDialog.database" :table="importDialog.table" :tables="importDialog.tables" @done="onImportDone" />
 
     <!-- 右键菜单：数据库 / 表 -->
@@ -204,6 +204,9 @@
         <li class="ctx-item" @click="onCtxCommand('create-db')">
           <el-icon><CirclePlus /></el-icon><span>新建数据库</span>
         </li>
+        <li class="ctx-item" @click="onCtxCommand('create')">
+          <el-icon><CirclePlus /></el-icon><span>新建表</span>
+        </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('edit-db')">
           <el-icon><EditPen /></el-icon><span>编辑数据库</span>
@@ -213,18 +216,14 @@
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('import-db')">
-          <el-icon><Upload /></el-icon><span>导入 CSV</span>
+          <el-icon><Download /></el-icon><span>导入 CSV</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('export-db')">
-          <el-icon><Download /></el-icon><span>导出 CSV</span>
+          <el-icon><Upload /></el-icon><span>导出 CSV</span>
         </li>
       </template>
       <!-- 表菜单 -->
       <template v-else>
-        <li class="ctx-item" @click="onCtxCommand('create')">
-          <el-icon><CirclePlus /></el-icon><span>新建表</span>
-        </li>
-        <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('rename')">
           <el-icon><EditPen /></el-icon><span>重命名</span>
         </li>
@@ -249,6 +248,8 @@
 
     <!-- 新建表对话框 -->
     <create-table-dialog v-model:visible="createTableDialog.visible" :conn="connection" :database="createTableDialog.database" @done="onTableCreated" />
+    <!-- 新建数据库对话框 -->
+    <create-database-dialog v-model:visible="createDatabaseDialog.visible" :conn="connection" @done="onDatabaseCreated" />
   </div>
 </template>
 
@@ -268,6 +269,7 @@ import ConnectionDialog from './components/ConnectionDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import ResultTable from './components/ResultTable.vue';
 import CreateTableDialog from './components/CreateTableDialog.vue';
+import CreateDatabaseDialog from './components/CreateDatabaseDialog.vue';
 
 // ============ 登录 ============
 const loggedIn = ref(false);
@@ -314,7 +316,7 @@ async function handleLogout() {
   loggedIn.value = false;
   Object.assign(user, { username: '', name: '' });
   connected.value = false;
-  Object.assign(connection, { id: '', name: '', type: 'mysql' });
+  Object.assign(connection, { id: '', name: '', type: 'mysql', host: '', port: 3306, user: '', password: '' });
   databases.value = []; treeData.value = [];
   resultTabs.value = [];
   ElMessage.success('已退出登录');
@@ -352,7 +354,7 @@ let editorInited = false;
 const connected = ref(false);
 const sidebarCollapsed = ref(false);
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; }
-const connection = reactive({ id: '', name: '', type: 'mysql' });
+const connection = reactive({ id: '', name: '', type: 'mysql', host: '', port: 3306, user: '', password: '' });
 const databases = ref([]);
 const databaseSelect = ref('');
 const currentDb = ref('');
@@ -401,12 +403,84 @@ function initEditor() {
 
 function openConnDialog() { connDialogVisible.value = true; }
 
+// 过滤系统库（当有非系统库时优先展示业务库）
+const SYSTEM_DBS = ['mysql', 'information_schema', 'performance_schema', 'sys'];
+function pickDefaultDb(dbs, preferDb) {
+  if (!dbs || !dbs.length) return '';
+  if (preferDb && dbs.includes(preferDb)) return preferDb;
+  const userDbs = dbs.filter((d) => !SYSTEM_DBS.includes(d));
+  return (userDbs[0] || dbs[0]) || '';
+}
+
 async function onConnected(conn) {
   Object.assign(connection, conn);
   connected.value = true;
   connDialogVisible.value = false;
+  // 清空上次连接残留
+  resultTabs.value = [];
+  activeTab.value = '';
+  resultMeta.value = '';
+  expandedKeys.value = [];
+  currentDb.value = '';
+  currentTable.value = '';
+
   await loadDatabases();
   await refreshTree();
+
+  // 连接成功后自动展示对应内容：选默认库 -> 展开 -> 显示第一张表数据
+  const dbs = databases.value || [];
+  if (!dbs.length) return;
+  const db = pickDefaultDb(dbs, conn && conn.database);
+  if (!db) return;
+  currentDb.value = db;
+  databaseSelect.value = db;
+  const dbKey = 'db:' + db;
+  // 注意：不要在拉到表之前就设置 expandedKeys，否则 el-tree 会触发 loadNode 自动加载，
+  // 后面我们再用 store.append 填充就会和 loadNode 的结果重复
+  await nextTick();
+  // 加载该库的表
+  let tables = [];
+  try {
+    tables = await api.listTables(connection.id, db);
+  } catch (e) {}
+  // 填充编辑器默认 SQL（根据是否有表）
+  if (cmInstance) {
+    if (tables.length) {
+      const t = tables[0].name;
+      cmInstance.setValue(`USE \`${db}\`;\nSELECT * FROM \`${t}\` LIMIT 50;\n`);
+    } else {
+      cmInstance.setValue(`USE \`${db}\`;\nSHOW TABLES;\n`);
+    }
+  }
+  // 如果有表，自动打开第一张表的数据
+  if (tables.length) {
+    const first = tables[0];
+    currentTable.value = first.name;
+    openResultTab({
+      kind: 'table', connId: connection.id, database: db, table: first.name, label: first.name
+    });
+    // 关键：lazy 模式下不要给 data.children 赋值（el-tree 会和 store 内部 childNodes 重复显示）
+    // 通过 store.append 把表节点直接塞进 el-tree 内部 store，并标记 loaded=true 避免后续展开时再调 loadNode
+    const tree = treeRef.value;
+    if (tree) {
+      const dbNode = tree.getNode(dbKey);
+      if (dbNode) {
+        dbNode.loaded = true;
+        tables.forEach((t) => {
+          try {
+            tree.store.append({
+              key: 'tb:' + db + '.' + t.name,
+              label: t.name, type: 'table', name: t.name,
+              database: db, rows: t.rows, isLeaf: true
+            }, dbNode);
+          } catch (e) {}
+        });
+        // 表节点已塞入 store，现在安全展开（loaded=true，不会再触发 loadNode）
+        dbNode.expanded = true;
+        expandedKeys.value = [dbKey];
+      }
+    }
+  }
 }
 
 async function loadDatabases() {
@@ -544,11 +618,20 @@ function formatRows(n) {
   return String(n);
 }
 
+function triggerDownload(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function exportTable(data) {
   if (!data || !data.name) return;
   const db = data.database || currentDb.value;
   const url = api.exportTableUrl(connection.id, db, data.name);
-  window.open(url, '_blank');
+  triggerDownload(url, `${db}_${data.name}.csv`);
   ElMessage.success('开始导出 ' + data.name);
 }
 
@@ -558,7 +641,7 @@ async function exportCurrentResult() {
   try {
     if (tab.kind === 'table' && tab.connId && tab.database && tab.table) {
       const url = api.exportTableUrl(tab.connId, tab.database, tab.table);
-      window.open(url, '_blank');
+      triggerDownload(url, `${tab.database}_${tab.table}.csv`);
       return;
     }
     const sql = cmInstance && cmInstance.getValue();
@@ -582,7 +665,65 @@ function openImport(data) {
   importDialog.tables = [];
   importDialog.visible = true;
 }
-function onImportDone() { importDialog.visible = false; refreshTree(); }
+async function reloadTablesOfDb(db) {
+  if (!db) return;
+  const dbKey = 'db:' + db;
+  // 1) 清掉外部 data 里可能被手动赋值过的 children
+  const dbNode = treeData.value.find((n) => n.type === 'database' && n.name === db);
+  if (dbNode) dbNode.children = undefined;
+  const tree = treeRef.value;
+  if (!tree) return;
+  // 2) 通过 el-tree 内部 Node API 重置
+  const node = tree.getNode(dbKey);
+  if (!node) return;
+  // 关键：用 store.remove(node) 传入 node 对象本身（不是 { key }），逐个移除旧 child
+  if (node.childNodes && node.childNodes.length) {
+    // 拷贝一份避免遍历时数组变动
+    const oldChildren = node.childNodes.slice();
+    oldChildren.forEach((child) => {
+      try { tree.store.remove(child); } catch (e) {}
+    });
+  }
+  node.loaded = false;          // 让 shouldLoadData() 返回 true
+  node.expanded = false;        // 先置为未展开，下一步 expand 才会真正触发 loadNode
+  // 3) 重新展开触发 loadNode -> resolve(最新表列表)
+  if (typeof node.expand === 'function') {
+    node.expand();
+  } else if (typeof node.loadData === 'function') {
+    node.loadData();
+  }
+}
+
+// 同步把已打开并展示中的表 Tab 结果刷新（用户能直接看到新导入的行）
+async function refreshActiveTableTabsIfMatch(db, tableName) {
+  if (!db) return;
+  const targets = resultTabs.value.filter(
+    (t) => t.kind === 'table' && t.database === db && (!tableName || t.table === tableName)
+  );
+  for (const t of targets) {
+    try {
+      const res = await api.getTableData(t.connId, t.database, t.table, 1, t.pageSize);
+      const existing = resultTabs.value.find((x) => x.id === t.id);
+      if (existing) Object.assign(existing, {
+        rows: res.rows,
+        columns: res.columns,
+        total: res.total,
+        page: 1
+      });
+    } catch (e) {}
+  }
+}
+
+function onImportDone(payload) {
+  const p = payload || {};
+  const db = p.database || importDialog.database;
+  const tbl = p.table || importDialog.table;
+  importDialog.visible = false;
+  // 精准刷新目标库的 children（含 rows 最新数字）
+  if (db) reloadTablesOfDb(db);
+  // 如果导入的是某张具体表，并且这个表的 Tab 打开了，刷新结果区
+  if (tbl) refreshActiveTableTabsIfMatch(db, tbl);
+}
 
 // 新建表对话框
 const createTableDialog = reactive({ visible: false, database: '' });
@@ -590,9 +731,70 @@ function openCreateTableDialog(database) {
   createTableDialog.database = database || currentDb.value;
   createTableDialog.visible = true;
 }
-function onTableCreated() {
+function onTableCreated(payload) {
+  const db = createTableDialog.database;
+  const table = payload && payload.table;
   createTableDialog.visible = false;
-  refreshTree();
+  // 刷新目标库表列表（含最新 rows）
+  if (db) reloadTablesOfDb(db);
+  // 如果能识别出新建的表名，自动打开它的数据 Tab
+  if (table) {
+    currentDb.value = db;
+    databaseSelect.value = db;
+    currentTable.value = table;
+    openResultTab({
+      kind: 'table', connId: connection.id, database: db, table, label: table
+    });
+  }
+}
+
+// 新建数据库对话框
+const createDatabaseDialog = reactive({ visible: false });
+function openCreateDatabaseDialog() {
+  createDatabaseDialog.visible = true;
+}
+async function onDatabaseCreated(payload) {
+  const newDb = payload && payload.database;
+  createDatabaseDialog.visible = false;
+  // 重建顶层（因为数据库数量变化必须重新 listDatabases）
+  const oldDbs = databases.value.slice();
+  await loadDatabases();
+  await refreshTree();
+  if (!newDb) return;
+  // 如果识别出新建库名，自动切过去展开
+  currentDb.value = newDb;
+  databaseSelect.value = newDb;
+  const dbKey = 'db:' + newDb;
+  try {
+    const tables = await api.listTables(connection.id, newDb);
+    const tree = treeRef.value;
+    if (tree) {
+      const dbNode = tree.getNode(dbKey);
+      if (dbNode) {
+        dbNode.loaded = true;
+        tables.forEach((t) => {
+          try {
+            tree.store.append({
+              key: 'tb:' + newDb + '.' + t.name,
+              label: t.name, type: 'table', name: t.name,
+              database: newDb, rows: t.rows, isLeaf: true
+            }, dbNode);
+          } catch (e) {}
+        });
+        dbNode.expanded = true;
+        expandedKeys.value = Array.from(new Set([...(expandedKeys.value || []), dbKey]));
+      }
+    }
+    if (tables.length) {
+      const first = tables[0];
+      currentTable.value = first.name;
+      openResultTab({
+        kind: 'table', connId: connection.id, database: newDb, table: first.name, label: first.name
+      });
+    } else {
+      if (cmInstance) cmInstance.setValue(`USE \`${newDb}\`;\nSHOW TABLES;\n`);
+    }
+  } catch (e) {}
 }
 
 // 右键菜单（数据库 / 表）
@@ -616,7 +818,7 @@ async function onCtxCommand(cmd) {
   closeContextMenu();
   switch (cmd) {
     // 表操作
-    case 'create': openCreateTableDialog(data ? data.database : currentDb.value); break;
+    case 'create': openCreateTableDialog(data ? (data.type === 'database' ? data.name : data.database) : currentDb.value); break;
     case 'import': openImport(data); break;
     case 'export': exportTable(data); break;
     case 'rename': handleRenameTable(data); break;
@@ -624,7 +826,7 @@ async function onCtxCommand(cmd) {
     case 'truncate': handleTruncateTable(data); break;
     case 'drop': handleDropTable(data); break;
     // 数据库操作
-    case 'create-db': handleCreateDatabase(); break;
+    case 'create-db': openCreateDatabaseDialog(); break;
     case 'edit-db': handleEditDatabase(data); break;
     case 'drop-db': handleDropDatabase(data); break;
     case 'import-db': handleDatabaseImport(data); break;
@@ -632,23 +834,9 @@ async function onCtxCommand(cmd) {
   }
 }
 
-// 新建数据库
+// 新建数据库（旧的 ElMessageBox 弹窗实现已替换为 CreateDatabaseDialog，保留函数仅作兼容占位）
 async function handleCreateDatabase() {
-  try {
-    const res = await ElMessageBox.prompt('请输入数据库名', '新建数据库', {
-      confirmButtonText: '确定', cancelButtonText: '取消',
-      inputValue: '',
-      inputPattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-      inputErrorMessage: '库名只能以字母/下划线开头，含字母数字下划线'
-    });
-    const name = res.value.trim();
-    await api.createDatabase(connection.id, name, 'utf8mb4');
-    ElMessage.success(`数据库 ${name} 创建成功`);
-    refreshTree();
-  } catch (e) {
-    if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('创建失败: ' + (e.message || e));
-  }
+  openCreateDatabaseDialog();
 }
 
 // 编辑数据库（修改字符集）
@@ -709,7 +897,7 @@ async function handleDatabaseImport(data) {
   }
 }
 
-// 库级导出：导出该库所有表为 CSV
+// 库级导出：导出该库所有表为 CSV（流式，逐表串行触发）
 async function handleDatabaseExport(data) {
   try {
     const tables = await api.listTables(connection.id, data.name);
@@ -718,9 +906,7 @@ async function handleDatabaseExport(data) {
     tables.forEach((t, i) => {
       setTimeout(() => {
         const url = api.exportTableUrl(connection.id, data.name, t.name);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${data.name}_${t.name}.csv`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        triggerDownload(url, `${data.name}_${t.name}.csv`);
       }, i * 400);
     });
   } catch (e) {

@@ -19,16 +19,13 @@
         <el-input v-model="form.host" placeholder="127.0.0.1" />
       </el-form-item>
       <el-form-item label="端口">
-        <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width:100%" />
+        <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width:100%" class="port-input" />
       </el-form-item>
       <el-form-item label="用户名">
         <el-input v-model="form.user" placeholder="root" />
       </el-form-item>
       <el-form-item label="密码">
         <el-input v-model="form.password" show-password placeholder="无密码可留空" />
-      </el-form-item>
-      <el-form-item label="数据库">
-        <el-input v-model="form.database" placeholder="可留空，连接后选择" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -46,18 +43,44 @@ import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 
-const props = defineProps({ visible: Boolean });
+const props = defineProps({
+  visible: Boolean,
+  // 已存在的连接对象（用于回显）；为空时用默认连接
+  initConn: { type: Object, default: null }
+});
 const emit = defineEmits(['update:visible', 'connected']);
 
-const form = reactive({ name: '本机 MySQL', type: 'mysql', host: '127.0.0.1', port: 3306, user: 'root', password: '', database: '' });
+const form = reactive({
+  id: '',
+  name: '本机 MySQL',
+  type: 'mysql',
+  host: '127.0.0.1',
+  port: 3306,
+  user: 'root',
+  password: ''
+});
 const testing = ref(false);
 const connecting = ref(false);
 
 watch(() => props.visible, async (v) => {
   if (v) {
+    // 优先用 initConn 回显（通常是当前正在使用的连接）
+    if (props.initConn && (props.initConn.id || props.initConn.host)) {
+      Object.assign(form, {
+        id: props.initConn.id || '',
+        name: props.initConn.name || form.name,
+        type: props.initConn.type || 'mysql',
+        host: props.initConn.host || form.host,
+        port: props.initConn.port != null ? Number(props.initConn.port) : form.port,
+        user: props.initConn.user || form.user,
+        // initConn 来自父组件内存对象时已含 password；若来自后端详情则 password 被脱敏（缺失）
+        password: props.initConn.password != null ? props.initConn.password : ''
+      });
+      return;
+    }
     try {
       const def = await api.getDefaultConnection();
-      if (def) Object.assign(form, def);
+      if (def) Object.assign(form, { password: '', ...def });
     } catch (e) {}
   }
 });
@@ -77,7 +100,9 @@ async function testConn() {
 async function confirm() {
   connecting.value = true;
   try {
-    const res = await api.connect({ ...form });
+    const payload = { ...form };
+    if (!payload.id) delete payload.id;
+    const res = await api.connect(payload);
     ElMessage.success('连接成功');
     emit('connected', { id: res.id, name: res.name || form.name, ...form });
   } catch (e) {
@@ -87,3 +112,9 @@ async function confirm() {
   }
 }
 </script>
+
+<style scoped>
+.port-input :deep(.el-input__wrapper .el-input__inner) {
+  text-align: left !important;
+}
+</style>

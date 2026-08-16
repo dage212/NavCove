@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
-    title="新建表"
+    title="新建数据库"
     width="900px"
     :close-on-click-modal="false"
     @open="onOpen"
@@ -10,8 +10,8 @@
     destroy-on-close
   >
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-      <span style="color:#5e6c84;font-size:13px;">目标库：</span>
-      <el-tag size="small">{{ database }}</el-tag>
+      <span style="color:#5e6c84;font-size:13px;">当前连接：</span>
+      <el-tag size="small">{{ conn && conn.name ? conn.name : '默认连接' }}</el-tag>
       <span style="color:#86909c;font-size:12px;margin-left:auto;">
         快捷键：Ctrl + Enter / Cmd + Enter 执行
       </span>
@@ -58,8 +58,7 @@ import api from '../api';
 
 const props = defineProps({
   visible: Boolean,
-  conn: Object,
-  database: String
+  conn: Object
 });
 const emit = defineEmits(['update:visible', 'done']);
 
@@ -68,19 +67,21 @@ const executing = ref(false);
 const resultLogs = ref([]);
 let cmInstance = null;
 
-function defaultTemplate(db) {
-  const q = (n) => '`' + String(n || '').replace(/`/g, '') + '`';
-  return `-- 在下方编写 CREATE TABLE / ALTER TABLE 等 DDL 语句，按 Ctrl+Enter 或点"执行"按钮运行
--- 注意：如果不加库名前缀，默认会对当前库（${q(db)}）执行
+function defaultTemplate() {
+  return `-- 在下方编写 CREATE DATABASE / ALTER DATABASE / DROP DATABASE 等 DDL 语句
+-- 按 Ctrl+Enter 或点"执行"按钮运行
 
-CREATE TABLE ${q(db)}.\`new_table_name\` (
-  \`id\` INT NOT NULL AUTO_INCREMENT COMMENT '主键 id',
-  \`name\` VARCHAR(255) NOT NULL COMMENT '名称',
-  \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (\`id\`),
-  KEY \`idx_name\` (\`name\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='请修改表名与字段';
+CREATE DATABASE \`new_database_name\`
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_general_ci;
+
+-- 如果需要直接切库并建表，可接着写：
+-- USE \`new_database_name\`;
+-- CREATE TABLE \`new_database_name\`.\`demo_table\` (
+--   \`id\` INT NOT NULL AUTO_INCREMENT COMMENT '主键',
+--   \`name\` VARCHAR(255) NOT NULL COMMENT '名称',
+--   PRIMARY KEY (\`id\`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `;
 }
 
@@ -97,7 +98,7 @@ async function onOpen() {
       smartIndent: true,
       matchBrackets: true,
       autoCloseBrackets: true,
-      placeholder: '在此输入 CREATE TABLE ...',
+      placeholder: '在此输入 CREATE DATABASE ...',
       extraKeys: {
         'Ctrl-Enter': () => runExecute(),
         'Cmd-Enter': () => runExecute(),
@@ -108,18 +109,14 @@ async function onOpen() {
         }
       }
     });
-    cmInstance.on('change', () => {
-      if (cmInstance) cmInstance.save(); // 同步回 textarea
-    });
+    cmInstance.on('change', () => { if (cmInstance) cmInstance.save(); });
   }
-  cmInstance.setValue(defaultTemplate(props.database));
+  cmInstance.setValue(defaultTemplate());
   cmInstance.focus();
-  // 触发 CodeMirror 内部重新计算高度（否则第一次打开可能高度不正确）
   setTimeout(() => cmInstance && cmInstance.refresh(), 100);
 }
 
 function onClosed() {
-  // 销毁实例，下次打开重新 init（避免 dialog 复用造成样式错乱、resize 失效）
   if (cmInstance) {
     try { cmInstance.toTextArea(); } catch (e) {}
     cmInstance = null;
@@ -151,17 +148,16 @@ async function runExecute() {
   if (!sql) { ElMessage.warning('请输入 SQL 语句'); return; }
   executing.value = true;
   try {
-    const res = await api.query(props.conn.id, props.database, sql);
-    // executeSql 返回数组（多语句时），逐个展示日志
+    // 建库语句不在特定 database 下执行，database 传空
+    const res = await api.query(props.conn.id, null, sql);
     const list = Array.isArray(res) ? res : [res];
-    // 表名识别：直接基于用户编写的原始 SQL 文本解析（executeSql 结果不带 sql 字段）
-    let createdTable = null;
-    const firstCreateMatch = sql.match(/create\s+table(?:\s+if\s+not\s+exists)?\s+(?:`?([\w$]+)`?\.)?\s*`?([\w$]+)`?/i);
-    if (firstCreateMatch) createdTable = firstCreateMatch[2];
+    // 识别第一个新建的数据库名（用于回调切库）
+    let createdDb = null;
+    const m = sql.match(/create\s+database(?:\s+if\s+not\s+exists)?\s+`?([\w$]+)`?/i);
+    if (m) createdDb = m[1];
 
     list.forEach((item, idx) => {
       if (item && typeof item === 'object') {
-        // 后端字段：SELECT 型给 rows/fields/affected；WRITE 型给 affected/insertId/changed/warning
         const isSelect = item.type === 'select' || Array.isArray(item.rows);
         const count = item.affected != null ? item.affected : (item.affectedRows != null ? item.affectedRows : (item.rows ? item.rows.length : null));
         const typeTag = item.type ? `[${item.type.toUpperCase()}] ` : '';
@@ -186,8 +182,7 @@ async function runExecute() {
       }
     });
     ElMessage.success('执行成功');
-    // emit done 让父组件刷新树；若能识别出新建的表名，也传过去
-    emit('done', { sql, table: createdTable, results: list });
+    emit('done', { sql, database: createdDb, results: list });
   } catch (e) {
     pushLog(false, e.message || String(e));
     ElMessage.error('执行失败：' + (e.message || e));
