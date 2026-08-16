@@ -630,6 +630,39 @@ async function getDatabaseInfo(connId, name) {
   return rows[0] || null;
 }
 
+// 查看库结构：SHOW CREATE DATABASE + 字符集 + 表列表
+async function getDatabaseStructure(connId, database) {
+  const pool = poolMgr.getPool(connId);
+  const quotedDb = '`' + String(database).replace(/`/g, '') + '`';
+  const [[createRow]] = await pool.query(`SHOW CREATE DATABASE ${quotedDb}`);
+  const createSql = (createRow && (createRow['Create Database'] || createRow['Create Database'] || '')) || '';
+  const info = await getDatabaseInfo(connId, database);
+  const [tblRows] = await pool.query(
+    `SELECT TABLE_NAME AS name, TABLE_TYPE AS type, ENGINE AS engine, TABLE_COLLATION AS collation,
+            TABLE_COMMENT AS comment, CREATE_OPTIONS AS createOptions
+     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME`,
+    [database]
+  );
+  return { createSql, charset: info?.charset || null, collation: info?.collation || null, tables: tblRows };
+}
+
+// 查看表结构：SHOW CREATE TABLE + 列详情 + 索引信息
+async function getTableStructure(connId, database, table) {
+  const pool = poolMgr.getPool(connId);
+  const quotedDb = '`' + String(database).replace(/`/g, '') + '`';
+  const quotedTbl = '`' + String(table).replace(/`/g, '') + '`';
+  const [[createRow]] = await pool.query(`SHOW CREATE TABLE ${quotedDb}.${quotedTbl}`);
+  const createSql = (createRow && (createRow['Create Table'] || createRow['Create View'] || '')) || '';
+  const columns = await describeTable(connId, database, table);
+  const [idxRows] = await pool.query(
+    `SELECT INDEX_NAME AS name, NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS seq, COLUMN_NAME AS columnName,
+            INDEX_TYPE AS indexType, NULLABLE AS nullable, COMMENT AS comment
+     FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+    [database, table]
+  );
+  return { createSql, columns, indexes: idxRows };
+}
+
 module.exports = {
   testConnection,
   listDatabases,
@@ -654,5 +687,265 @@ module.exports = {
   createDatabase,
   dropDatabase,
   alterDatabase,
-  getDatabaseInfo
+  getDatabaseInfo,
+  getDatabaseStructure,
+  getTableStructure,
+  exportTableSqlStream,
+  exportDatabaseSqlStream
 };
+
+// ======================================================
+// SQL 导出（库级 / 表级，流式 + 可选项：schema/data）
+// ======================================================
+
+// 把任意字符串安全转成 SQL 字符串字面量（含 NULL 处理）
+function sqlStringLiteral(val) {
+  if (val === null || val === undefined) return 'NULL';
+  if (val instanceof Buffer) {
+    return '0x' + val.toString('hex');
+  }
+  if (typeof val === 'number' || typeof val === 'bigint' || typeof val === 'boolean') {
+    if (Number.isNaN(val) || !isFinite(val)) return 'NULL';
+    return String(val);
+  }
+  if (val instanceof Date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const s = val.getFullYear() + '-' + pad(val.getMonth() + 1) + '-' + pad(val.getDate()) +
+      ' ' + pad(val.getHours()) + ':' + pad(val.getMinutes()) + ':' + pad(val.getSeconds());
+    return "'" + s.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+  }
+  // 字符串 / 其它
+  let s = String(val);
+  // 转义反斜杠 + 单引号 + 控制字符
+  s = s.replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\u0000/g, '\\0')
+    .replace(/\u0008/g, '\\b')
+    .replace(/\t/g, '\\t')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u001a/g, '\\Z');
+  return "'" + s + "'";
+}
+
+// 返回值转 INSERT 里的 (col1, col2, ...) 行
+function rowToValuesList(columns, row) {
+  const parts = [];
+  for (const c of columns) {
+    parts.push(sqlStringLiteral(row[c.name]));
+  }
+  return '(' + parts.join(', ') + ')';
+}
+
+/**
+ * 流式导出单张表为 SQL 文件
+ * @param {string} connId
+ * @param {string} database
+ * @param {string} table
+ * @param {Object} opts
+ * @param {boolean} opts.withSchema 导出建表 DDL
+ * @param {boolean} opts.withData   导出数据 INSERT
+ * @param {number} opts.maxRowsPerInsert 每个 INSERT 包含的行数（默认 100）
+ * @returns {Readable} SQL 文本可读流（开头 UTF-8 BOM）
+ */
+function exportTableSqlStream(connId, database, table, opts = {}) {
+  const meta = poolMgr.getMeta(connId);
+  const { withSchema = true, withData = true, limit, maxRowsPerInsert = 100 } = opts;
+  if (!withSchema && !withData) {
+    const { PassThrough } = require('stream');
+    const s = new PassThrough();
+    s.end('\ufeff-- 未选择任何导出项（结构/数据）\n');
+    return s;
+  }
+  const mysql = require('mysql2');
+  const { PassThrough, Transform, Readable } = require('stream');
+
+  // 头部写入 BOM + 注释；后续写入建表语句 / 数据语句
+  const out = new PassThrough();
+  let header = '\ufeff';
+  header += `-- SQL Dump: \`${database}\`.\`${table}\`\n`;
+  header += `-- Generated at ${new Date().toISOString()}\n`;
+  header += `SET NAMES utf8mb4;\n`;
+  header += `SET FOREIGN_KEY_CHECKS = 0;\n\n`;
+  out.write(header);
+
+  let rawConn = null;
+  const metaPool = poolMgr.getPool(connId); // promise pool，用来跑 SHOW CREATE / SHOW COLUMNS 小查询
+  const quotedDb = '`' + String(database).replace(/`/g, '') + '`';
+  const quotedTbl = '`' + String(table).replace(/`/g, '') + '`';
+
+  (async () => {
+    try {
+      // 1) 建表语句
+      if (withSchema) {
+        out.write(`-- Table structure for ${quotedDb}.${quotedTbl}\n`);
+        out.write(`DROP TABLE IF EXISTS ${quotedDb}.${quotedTbl};\n`);
+        const [[row]] = await metaPool.query(
+          `SHOW CREATE TABLE ${quotedDb}.${quotedTbl}`
+        );
+        const ddl = (row && (row['Create Table'] || row['Create View'] || '')) || '';
+        if (!ddl) throw new Error('无法获取 ' + table + ' 的建表语句');
+        out.write(ddl + ';\n\n');
+      }
+
+      // 2) 数据 INSERT（流式）
+      if (withData) {
+        out.write(`-- Dumping data for ${quotedDb}.${quotedTbl}\n`);
+        // 拿列定义（用于构造 INSERT 的列名顺序、值顺序）
+        const cols = await describeTable(connId, database, table);
+        if (!cols.length) {
+          out.write(`-- 表无列定义，跳过数据\n\n`);
+        } else {
+          const colNames = cols.map((c) => '`' + String(c.Field).replace(/`/g, '') + '`');
+          const columns = cols.map((c) => ({ name: c.Field }));
+          const insertHead = `INSERT INTO ${quotedDb}.${quotedTbl} (${colNames.join(', ')}) VALUES\n`;
+
+          // 开一条独立 mysql2 回调连接用于流式查询
+          await new Promise((resolve, reject) => {
+            rawConn = mysql.createConnection({
+              host: meta.host, port: meta.port || 3306,
+              user: meta.user, password: meta.password == null ? '' : String(meta.password),
+              database, charset: 'utf8mb4'
+            });
+            rawConn.connect((err) => { if (err) reject(err); else resolve(); });
+          });
+
+          // 流式分页：每 maxRowsPerInsert 行写成一条独立的 INSERT 语句
+          let rowBuffer = [];
+          let anyData = false;
+
+          function flushBuffer() {
+            if (!rowBuffer.length) return true;
+            // 每批输出完整的 INSERT 语句：INSERT INTO ... VALUES (..),(..),...;
+            let ok = out.write(insertHead);
+            ok = out.write(rowBuffer.join(',\n')) && ok;
+            ok = out.write(';\n') && ok;
+            anyData = true;
+            rowBuffer = [];
+            return ok;
+          }
+
+          await new Promise((resolve, reject) => {
+            let dataSql = `SELECT * FROM ${quotedDb}.${quotedTbl}`;
+            if (limit && limit > 0) dataSql += ` LIMIT ${Number(limit)}`;
+            const queryStream = rawConn.query(dataSql).stream();
+            queryStream.on('error', reject);
+            // 注意：.stream() 返回的是 Readable，事件是 'data'/'end'/'error'
+            // （'result' 是 Query 对象的事件，流式查询不会触发，会导致永远卡住）
+            queryStream.on('data', (row) => {
+              rowBuffer.push(rowToValuesList(columns, row));
+              if (rowBuffer.length >= maxRowsPerInsert) {
+                // 背压：暂停流，等 out 可写后再恢复
+                queryStream.pause();
+                const canContinue = flushBuffer();
+                if (canContinue) {
+                  queryStream.resume();
+                } else {
+                  out.once('drain', () => queryStream.resume());
+                }
+              }
+            });
+            queryStream.on('end', () => {
+              // 先 flush 最后一小段
+              try {
+                flushBuffer();
+                if (anyData) out.write('\n');
+                else out.write(`-- 表无数据\n\n`);
+                resolve();
+              } catch (e) { reject(e); }
+            });
+          });
+        }
+      }
+
+      out.write(`SET FOREIGN_KEY_CHECKS = 1;\n`);
+      out.write(`-- Dump completed: ${quotedDb}.${quotedTbl}\n`);
+      out.end();
+    } catch (err) {
+      out.destroy(err);
+    } finally {
+      if (rawConn) { try { rawConn.end(() => {}); } catch (e) {} rawConn = null; }
+    }
+  })();
+
+  return out;
+}
+
+/**
+ * 流式导出整库 SQL（顺序：CREATE DATABASE → 逐表 exportTableSqlStream）
+ */
+function exportDatabaseSqlStream(connId, database, opts = {}) {
+  const { withSchema = true, withData = true, limit, maxRowsPerInsert = 100 } = opts;
+  const meta = poolMgr.getMeta(connId);
+  const { Readable, PassThrough } = require('stream');
+
+  if (!withSchema && !withData) {
+    const s = new PassThrough();
+    s.end('\ufeff-- 未选择任何导出项（结构/数据）\n');
+    return s;
+  }
+
+  const out = new PassThrough();
+  const quotedDb = '`' + String(database).replace(/`/g, '') + '`';
+
+  (async () => {
+    try {
+      out.write('\ufeff');
+      out.write(`-- SQL Dump: Database ${quotedDb}\n`);
+      out.write(`-- Generated at ${new Date().toISOString()}\n`);
+      out.write(`SET NAMES utf8mb4;\n`);
+      out.write(`SET FOREIGN_KEY_CHECKS = 0;\n\n`);
+
+      // CREATE DATABASE 语句（仅 withSchema 时导出）
+      if (withSchema) {
+        out.write(`-- Database structure for ${quotedDb}\n`);
+        out.write(`CREATE DATABASE /*!32312 IF NOT EXISTS*/ ${quotedDb} /*!40100 DEFAULT CHARACTER SET utf8mb4 */;\n`);
+        out.write(`USE ${quotedDb};\n\n`);
+      }
+
+      // 拉库下表列表
+      const pool = poolMgr.getPool(connId);
+      const [tblRows] = await pool.query(
+        `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME`,
+        [database]
+      );
+      const tableNames = tblRows.map((r) => r.name);
+
+      out.write(`-- Tables: ${tableNames.length || 0}\n\n`);
+
+      // 串行逐表（避免流式开多条连接）；把每张表的 SQL 流 pipe 进去
+      for (let i = 0; i < tableNames.length; i++) {
+        const tbl = tableNames[i];
+        out.write(`-- ========== [${i + 1}/${tableNames.length}] ${quotedDb}.\`${tbl}\` ==========\n`);
+        const tableStream = exportTableSqlStream(connId, database, tbl, { withSchema, withData, limit, maxRowsPerInsert });
+        // 表里的 BOM / 头注释会重复，这里在 pipe 前剥掉第一行 BOM 及开头的 "SET NAMES/FOREIGN_KEY_CHECKS"
+        // 简单做法：先读 tableStream 到 buffer，然后写（除第一张外）；否则 BOM 重复会导致导入异常
+        const chunks = [];
+        await new Promise((resolve, reject) => {
+          tableStream.on('error', reject);
+          tableStream.on('data', (c) => chunks.push(c));
+          tableStream.on('end', resolve);
+        });
+        let text = Buffer.concat(chunks).toString('utf8');
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        // 去掉通用头（第二、三段注释 + SET NAMES + SET FOREIGN_KEY_CHECKS）
+        text = text.replace(/^-- SQL Dump: [^\n]*\n/, '');
+        text = text.replace(/^-- Generated at [^\n]*\n/, '');
+        text = text.replace(/^SET NAMES utf8mb4;\n/, '');
+        text = text.replace(/^SET FOREIGN_KEY_CHECKS = 0;\n\n?/, '');
+        // 去掉尾部的 SET FOREIGN_KEY_CHECKS=1 + Dump completed（最后统一加一次）
+        text = text.replace(/\nSET FOREIGN_KEY_CHECKS = 1;\n-- Dump completed: [^\n]*\n?$/, '\n');
+        out.write(text);
+      }
+
+      out.write(`\nSET FOREIGN_KEY_CHECKS = 1;\n`);
+      out.write(`-- Dump completed: database ${quotedDb}\n`);
+      out.end();
+    } catch (err) {
+      out.destroy(err);
+    }
+  })();
+
+  return out;
+}

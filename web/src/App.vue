@@ -180,7 +180,8 @@
                   <span>{{ tab.label }}</span>
                   <el-icon style="margin-left:4px;vertical-align:middle" @click.stop="closeTab(i)"><Close /></el-icon>
                 </template>
-                <result-table :tab="tab" :conn-id="connection.id" @export="exportTable" />
+                <result-table v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'" :tab="tab" :conn-id="connection.id" @export="exportTable" />
+                <structure-view v-else :tab="tab" :conn-id="connection.id" />
               </el-tab-pane>
             </el-tabs>
           </div>
@@ -208,6 +209,9 @@
           <el-icon><CirclePlus /></el-icon><span>新建表</span>
         </li>
         <li class="ctx-divider"></li>
+        <li class="ctx-item" @click="onCtxCommand('view-db-structure')">
+          <el-icon><Menu /></el-icon><span>查看库结构</span>
+        </li>
         <li class="ctx-item" @click="onCtxCommand('edit-db')">
           <el-icon><EditPen /></el-icon><span>编辑数据库</span>
         </li>
@@ -221,9 +225,16 @@
         <li class="ctx-item" @click="onCtxCommand('export-db')">
           <el-icon><Upload /></el-icon><span>导出 CSV</span>
         </li>
+        <li class="ctx-item" @click="onCtxCommand('export-db-sql')">
+          <el-icon><Connection /></el-icon><span>导出 SQL</span>
+        </li>
       </template>
       <!-- 表菜单 -->
       <template v-else>
+        <li class="ctx-item" @click="onCtxCommand('view-table-structure')">
+          <el-icon><Menu /></el-icon><span>查看表结构</span>
+        </li>
+        <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('rename')">
           <el-icon><EditPen /></el-icon><span>重命名</span>
         </li>
@@ -243,6 +254,9 @@
         <li class="ctx-item" @click="onCtxCommand('export')">
           <el-icon><Download /></el-icon><span>导出 CSV</span>
         </li>
+        <li class="ctx-item" @click="onCtxCommand('export-sql')">
+          <el-icon><Connection /></el-icon><span>导出 SQL</span>
+        </li>
       </template>
     </ul>
 
@@ -250,6 +264,15 @@
     <create-table-dialog v-model:visible="createTableDialog.visible" :conn="connection" :database="createTableDialog.database" @done="onTableCreated" />
     <!-- 新建数据库对话框 -->
     <create-database-dialog v-model:visible="createDatabaseDialog.visible" :conn="connection" @done="onDatabaseCreated" />
+    <!-- 导出 SQL 对话框（表级 / 库级共用） -->
+    <export-sql-dialog
+      v-model:visible="exportSqlDialog.visible"
+      :kind="exportSqlDialog.kind"
+      :conn="connection"
+      :database="exportSqlDialog.database"
+      :table="exportSqlDialog.table"
+      @done="onExportSqlDone"
+    />
   </div>
 </template>
 
@@ -270,6 +293,8 @@ import ImportDialog from './components/ImportDialog.vue';
 import ResultTable from './components/ResultTable.vue';
 import CreateTableDialog from './components/CreateTableDialog.vue';
 import CreateDatabaseDialog from './components/CreateDatabaseDialog.vue';
+import ExportSqlDialog from './components/ExportSqlDialog.vue';
+import StructureView from './components/StructureView.vue';
 
 // ============ 登录 ============
 const loggedIn = ref(false);
@@ -797,6 +822,62 @@ async function onDatabaseCreated(payload) {
   } catch (e) {}
 }
 
+// 导出 SQL 对话框（表级 / 库级共用）
+const exportSqlDialog = reactive({
+  visible: false,
+  kind: 'table',   // 'table' | 'database'
+  database: '',
+  table: ''
+});
+function openExportSqlTableDialog(data) {
+  const database = data && data.database ? data.database : (data && data.name ? data.database : currentDb.value);
+  const table = data && data.name ? data.name : '';
+  exportSqlDialog.kind = 'table';
+  exportSqlDialog.database = database;
+  exportSqlDialog.table = table;
+  exportSqlDialog.visible = true;
+}
+function openExportSqlDatabaseDialog(data) {
+  exportSqlDialog.kind = 'database';
+  exportSqlDialog.database = data && data.name ? data.name : currentDb.value;
+  exportSqlDialog.table = '';
+  exportSqlDialog.visible = true;
+}
+function onExportSqlDone() {
+  // 导出是浏览器 <a download> 触发，不需要额外动作；留空方便扩展
+}
+function openDbStructureTab(data) {
+  const database = (data && data.name) || currentDb.value;
+  if (!database) { ElMessage.warning('未选择数据库'); return; }
+  currentDb.value = database;
+  const id = 'tab_' + Date.now();
+  const tab = {
+    id,
+    kind: 'structure-db',
+    database,
+    label: `库结构：${database}`
+  };
+  resultTabs.value = [tab];
+  activeTab.value = id;
+}
+function openTableStructureTab(data) {
+  const database = data && data.database ? data.database : currentDb.value;
+  const table = data && data.name ? data.name : '';
+  if (!database || !table) { ElMessage.warning('未选择表'); return; }
+  currentDb.value = database;
+  currentTable.value = table;
+  const id = 'tab_' + Date.now();
+  const tab = {
+    id,
+    kind: 'structure-table',
+    database,
+    table,
+    label: `表结构：${table}`
+  };
+  resultTabs.value = [tab];
+  activeTab.value = id;
+}
+
 // 右键菜单（数据库 / 表）
 const contextMenu = reactive({ visible: false, x: 0, y: 0, data: null, kind: 'table' });
 function onTreeContextMenu(data, e) {
@@ -821,16 +902,20 @@ async function onCtxCommand(cmd) {
     case 'create': openCreateTableDialog(data ? (data.type === 'database' ? data.name : data.database) : currentDb.value); break;
     case 'import': openImport(data); break;
     case 'export': exportTable(data); break;
+    case 'export-sql': openExportSqlTableDialog(data); break;
+    case 'view-table-structure': openTableStructureTab(data); break;
     case 'rename': handleRenameTable(data); break;
     case 'copy': handleCopyTable(data); break;
     case 'truncate': handleTruncateTable(data); break;
     case 'drop': handleDropTable(data); break;
     // 数据库操作
     case 'create-db': openCreateDatabaseDialog(); break;
+    case 'view-db-structure': openDbStructureTab(data); break;
     case 'edit-db': handleEditDatabase(data); break;
     case 'drop-db': handleDropDatabase(data); break;
     case 'import-db': handleDatabaseImport(data); break;
     case 'export-db': handleDatabaseExport(data); break;
+    case 'export-db-sql': openExportSqlDatabaseDialog(data); break;
   }
 }
 

@@ -80,6 +80,11 @@ export const api = {
     http.post('/database/alter', { connId, name, charset }),
   getDatabaseInfo: (connId, name) =>
     http.get('/database/info', { params: { connId, name } }),
+  // 查看结构
+  getDatabaseStructure: (connId, database) =>
+    http.get('/database/structure', { params: { connId, database } }),
+  getTableStructure: (connId, database, table) =>
+    http.get('/table/structure', { params: { connId, database, table } }),
   // 查询
   query: (connId, database, sql) => http.post('/query', { connId, database, sql }),
   // 导入导出
@@ -87,6 +92,25 @@ export const api = {
     `/api/export/table?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}${limit ? `&limit=${limit}` : ''}`,
   exportQueryCsv: (connId, database, sql) =>
     http.post('/export/query', { connId, database, sql }, { responseType: 'blob' }),
+  // SQL 导出（结构 + 数据可分别勾选）
+  exportSqlTableUrl: (connId, database, table, opts = {}) => {
+    const base = `/api/export/sql/table?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}`;
+    const qs = new URLSearchParams();
+    if (opts.withSchema === false) qs.append('withSchema', '0');
+    if (opts.withData === false) qs.append('withData', '0');
+    if (opts.limit && opts.limit > 0) qs.append('limit', String(opts.limit));
+    const q = qs.toString();
+    return base + (q ? `&${q}` : '');
+  },
+  exportSqlDatabaseUrl: (connId, database, opts = {}) => {
+    const base = `/api/export/sql/database?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}`;
+    const qs = new URLSearchParams();
+    if (opts.withSchema === false) qs.append('withSchema', '0');
+    if (opts.withData === false) qs.append('withData', '0');
+    if (opts.limit && opts.limit > 0) qs.append('limit', String(opts.limit));
+    const q = qs.toString();
+    return base + (q ? `&${q}` : '');
+  },
   importTable: (connId, database, table, content, replace) =>
     http.post('/import/table', { connId, database, table, content, replace }),
 

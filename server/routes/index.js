@@ -260,6 +260,18 @@ router.get('/database/info', async (ctx) => {
   ctx.body = ok(await svc.getDatabaseInfo(connId, name));
 });
 
+// 查看库结构
+router.get('/database/structure', async (ctx) => {
+  const { connId, database } = ctx.query;
+  ctx.body = ok(await svc.getDatabaseStructure(connId, database));
+});
+
+// 查看表结构
+router.get('/table/structure', async (ctx) => {
+  const { connId, database, table } = ctx.query;
+  ctx.body = ok(await svc.getTableStructure(connId, database, table));
+});
+
 // --- SQL 执行 ---
 router.post('/query', async (ctx) => {
   const { connId, database, sql } = ctx.request.body || {};
@@ -291,6 +303,36 @@ router.post('/export/query', async (ctx) => {
   ctx.set('Content-Type', 'text/csv; charset=utf-8');
   ctx.set('Content-Disposition', `attachment; filename="${filename}"`);
   ctx.body = '\ufeff' + csv;
+});
+
+// 导出单表 SQL（支持 schema/data 两个复选）
+router.get('/export/sql/table', async (ctx) => {
+  const { connId, database, table } = ctx.query;
+  const withSchema = ctx.query.withSchema !== '0' && ctx.query.withSchema !== 'false';
+  const withData = ctx.query.withData !== '0' && ctx.query.withData !== 'false';
+  const opts = { withSchema, withData };
+  const limit = Number(ctx.query.limit);
+  if (Number.isFinite(limit) && limit > 0) opts.limit = limit;
+  const stream = svc.exportTableSqlStream(connId, database, table, opts);
+  const filename = encodeURIComponent(`${database}_${table}.sql`);
+  ctx.set('Content-Type', 'application/sql; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="${filename}"`);
+  ctx.body = stream;
+});
+
+// 导出整库 SQL
+router.get('/export/sql/database', async (ctx) => {
+  const { connId, database } = ctx.query;
+  const withSchema = ctx.query.withSchema !== '0' && ctx.query.withSchema !== 'false';
+  const withData = ctx.query.withData !== '0' && ctx.query.withData !== 'false';
+  const opts = { withSchema, withData };
+  const limit = Number(ctx.query.limit);
+  if (Number.isFinite(limit) && limit > 0) opts.limit = limit;
+  const stream = svc.exportDatabaseSqlStream(connId, database, opts);
+  const filename = encodeURIComponent(`${database}.sql`);
+  ctx.set('Content-Type', 'application/sql; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="${filename}"`);
+  ctx.body = stream;
 });
 
 // 导入 CSV（文本内容上传，仍保留兼容）
