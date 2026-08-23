@@ -92,6 +92,8 @@ export const api = {
     `/api/export/table?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}${limit ? `&limit=${limit}` : ''}`,
   exportQueryCsv: (connId, database, sql) =>
     http.post('/export/query', { connId, database, sql }, { responseType: 'blob' }),
+  exportQuerySql: (connId, database, sql, table) =>
+    http.post('/export/query/sql', { connId, database, sql, table }, { responseType: 'blob' }),
   // SQL 导出（结构 + 数据可分别勾选）
   exportSqlTableUrl: (connId, database, table, opts = {}) => {
     const base = `/api/export/sql/table?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}`;
@@ -118,7 +120,7 @@ export const api = {
   importInit: (payload) => http.post('/import/upload/init', payload),
   // 切片上传使用 FormData（multipart/form-data）：Content-Type 交给浏览器自动生成（带 boundary）
   importChunk: (formData) => http.post('/import/upload/chunk', formData),
-  importMerge: (payload) => http.post('/import/upload/merge', payload),
+  importMerge: (payload) => http.post('/import/upload/merge', payload, { timeout: 300000 }),
   importCancel: (uploadId) => http.delete(`/import/upload/${uploadId}`)
 };
 

@@ -83,6 +83,7 @@ function waitForHttp(port, retries = 30) {
 
 // ============ 窗口 ============
 async function createWindow() {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -91,7 +92,9 @@ async function createWindow() {
     title: 'NavCove',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     backgroundColor: '#F0F5FF',
-    frame: false,
+    // macOS 用原生交通灯按钮（hiddenInset）；Windows/Linux 无框自定义按钮
+    frame: isMac ? true : false,
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

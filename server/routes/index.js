@@ -305,6 +305,16 @@ router.post('/export/query', async (ctx) => {
   ctx.body = '\ufeff' + csv;
 });
 
+// 导出 SQL 查询结果为 SQL 文件（INSERT 语句）
+router.post('/export/query/sql', async (ctx) => {
+  const { connId, database, sql, table } = ctx.request.body || {};
+  const out = await svc.exportQuerySql(connId, database, sql, table);
+  const filename = encodeURIComponent(`${table || 'query_result'}.sql`);
+  ctx.set('Content-Type', 'application/sql; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="${filename}"`);
+  ctx.body = out;
+});
+
 // 导出单表 SQL（支持 schema/data 两个复选）
 router.get('/export/sql/table', async (ctx) => {
   const { connId, database, table } = ctx.query;
@@ -386,15 +396,35 @@ router.post('/import/upload/merge', async (ctx) => {
       batchSize: batchSize ? Number(batchSize) : undefined
     })
     : null;
-  const merged = await uploadSvc.mergeUpload({ uploadId, importFn });
-  const msg = needImport
-    ? `合并成功，导入完成，影响 ${(merged.imported && merged.imported.inserted) || 0} 行`
-    : '合并成功';
-  ctx.body = ok({
-    mergedFilePath: merged.mergedFilePath,
-    size: merged.size,
-    imported: merged.imported || null
-  }, msg);
+  try {
+    const merged = await uploadSvc.mergeUpload({ uploadId, importFn });
+    const msg = needImport
+      ? `合并成功，导入完成，影响 ${(merged.imported && merged.imported.inserted) || 0} 行`
+      : '合并成功';
+    ctx.body = ok({
+      mergedFilePath: merged.mergedFilePath,
+      size: merged.size,
+      imported: merged.imported || null
+    }, msg);
+  } catch (e) {
+    // 导入失败也清理已合并文件和切片，避免缓存文件长期占用磁盘。
+    uploadSvc.cleanup(uploadId);
+    // 把数据库具体错误原因返回给前端
+    // mysql2 错误对象包含 code(如 ER_DUP_ENTRY)、errno、sqlState、sqlMessage
+    ctx.status = e.status || 500;
+    const dbCode = e.code ? `[${e.code}] ` : '';
+    const dbMsg = e.sqlMessage || e.message || '未知错误';
+    ctx.body = {
+      code: ctx.status,
+      message: `导入失败：${dbCode}${dbMsg}`,
+      dbError: e.code ? {
+        code: e.code,
+        errno: e.errno,
+        sqlState: e.sqlState,
+        sqlMessage: e.sqlMessage
+      } : undefined
+    };
+  }
 });
 
 // 4) 取消 + 清理

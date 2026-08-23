@@ -1,30 +1,41 @@
 <template>
   <div style="height:100%;display:flex;flex-direction:column;overflow:hidden;">
     <!-- 只读工具栏（新增行按钮 + 分页） -->
-    <div v-if="tab.kind === 'table'" class="table-toolbar">
+    <div v-if="isEditable" class="table-toolbar">
       <span class="t-label">{{ tab.database }} . {{ tab.table }}</span>
       <div style="flex:1"></div>
-      <el-input-number v-model="page" :min="1" size="small" style="width:110px" @change="loadData" />
-      <span style="color:var(--c-text-3);font-size:12px">/ {{ totalPages }} 页</span>
-      <el-select v-model="size" size="small" style="width:100px" @change="onSizeChange">
-        <el-option :value="20" label="20 条/页" />
-        <el-option :value="50" label="50 条/页" />
-        <el-option :value="100" label="100 条/页" />
-        <el-option :value="200" label="200 条/页" />
-      </el-select>
-      <el-button-group size="small">
-        <el-button :disabled="page <= 1" @click="goPage(1)"><el-icon><DArrowLeft /></el-icon></el-button>
-        <el-button :disabled="page <= 1" @click="goPage(page - 1)"><el-icon><ArrowLeft /></el-icon></el-button>
-        <el-button :disabled="page >= totalPages" @click="goPage(page + 1)"><el-icon><ArrowRight /></el-icon></el-button>
-        <el-button :disabled="page >= totalPages" @click="goPage(totalPages)"><el-icon><DArrowRight /></el-icon></el-button>
-      </el-button-group>
+      <template v-if="isPaginated">
+        <el-input-number v-model="page" :min="1" :max="totalPages" size="small" style="width:110px" @change="goPage(page)" />
+        <span style="color:var(--c-text-3);font-size:12px">/ {{ totalPages }} 页</span>
+        <el-select v-model="size" size="small" style="width:100px" @change="onSizeChange">
+          <el-option :value="20" label="20 条/页" />
+          <el-option :value="50" label="50 条/页" />
+          <el-option :value="100" label="100 条/页" />
+          <el-option :value="200" label="200 条/页" />
+        </el-select>
+        <el-button-group size="small">
+          <el-button :disabled="page <= 1" @click="goPage(1)"><el-icon><DArrowLeft /></el-icon></el-button>
+          <el-button :disabled="page <= 1" @click="goPage(page - 1)"><el-icon><ArrowLeft /></el-icon></el-button>
+          <el-button :disabled="page >= totalPages" @click="goPage(page + 1)"><el-icon><ArrowRight /></el-icon></el-button>
+          <el-button :disabled="page >= totalPages" @click="goPage(totalPages)"><el-icon><DArrowRight /></el-icon></el-button>
+        </el-button-group>
+      </template>
       <el-button size="small" type="success" plain :disabled="!pkColumns.length" @click="startNewRow">
         <el-icon><Plus /></el-icon><span style="margin-left:4px">新增行</span>
       </el-button>
-      <el-button size="small" @click="$emit('export', { database: tab.database, name: tab.table })">
-        <el-icon><Download /></el-icon><span style="margin-left:4px">导出</span>
-      </el-button>
-      <el-button size="small" @click="loadData"><el-icon><Refresh /></el-icon></el-button>
+      <el-dropdown size="small" trigger="click" @command="onExport">
+        <el-button size="small">
+          <el-icon><Download /></el-icon><span style="margin-left:4px">导出</span>
+          <el-icon style="margin-left:2px"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="csv"><el-icon><Download /></el-icon>导出 CSV</el-dropdown-item>
+            <el-dropdown-item command="sql"><el-icon><Connection /></el-icon>导出 SQL</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-button size="small" @click="refreshData"><el-icon><Refresh /></el-icon></el-button>
     </div>
 
     <div v-else-if="tab.kind === 'write'" class="write-info">
@@ -52,7 +63,7 @@
       >
         <el-table-column type="index" label="#" width="50" fixed />
         <!-- 操作列：删除按钮（新增行/普通行均有） -->
-        <el-table-column v-if="tab.kind === 'table'" label="操作" width="64" fixed>
+        <el-table-column v-if="isEditable" label="操作" width="64" fixed>
           <template #default="{ row, $index }">
             <template v-if="row._isNew">
               <span class="state-tag st-new" title="新增行">新</span>
@@ -70,7 +81,6 @@
           :min-width="colWidth(col)"
           show-overflow-tooltip
           sortable="custom"
-          :class-name="colClass(col)"
         >
           <template #header>
             <div class="col-head">
@@ -79,7 +89,7 @@
               <span v-if="colNull(col)" class="null-mark" title="可空">?</span>
             </div>
           </template>
-          <template #default="{ row, column }">
+          <template #default="{ row }">
             <!-- 单元格编辑模式（点击后弹出输入框 + ✓/✗） -->
             <template v-if="isEditingCell(row, col)">
               <div class="cell-editor">
@@ -103,17 +113,6 @@
                 </div>
               </div>
             </template>
-            <!-- 新增行：✓/✗ 放在最后一列（用操作列位置，这里放列内操作按钮） -->
-            <template v-else-if="row._isNew && col === newRowActionsCol">
-              <div class="new-row-actions">
-                <el-button size="small" type="success" :loading="newRowSubmitting" @click="confirmNewRow" title="确认新增">
-                  <el-icon><Check /></el-icon><span style="margin-left:2px">确认</span>
-                </el-button>
-                <el-button size="small" type="danger" :disabled="newRowSubmitting" @click="cancelNewRow" title="放弃新增">
-                  <el-icon><Close /></el-icon><span style="margin-left:2px">取消</span>
-                </el-button>
-              </div>
-            </template>
             <!-- 普通显示（点击可编辑） -->
             <template v-else>
               <div
@@ -126,16 +125,29 @@
             </template>
           </template>
         </el-table-column>
+        <!-- 新增行的确认/取消：固定在右侧，避免横向滚动时被遮挡或占用字段列 -->
+        <el-table-column v-if="newRow" label="新增操作" width="140" fixed="right" class-name="col-new-actions">
+          <template #default="{ row }">
+            <div v-if="row._isNew" class="new-row-actions">
+              <el-button size="small" type="success" :loading="newRowSubmitting" @click="confirmNewRow" title="确认新增">
+                <el-icon><Check /></el-icon><span style="margin-left:2px">确认</span>
+              </el-button>
+              <el-button size="small" type="danger" :disabled="newRowSubmitting" @click="cancelNewRow" title="放弃新增">
+                <el-icon><Close /></el-icon><span style="margin-left:2px">取消</span>
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
-    <div v-if="tab.kind === 'table'" class="table-footer">
+    <div v-if="isEditable" class="table-footer">
       <template v-if="!pkColumns.length">
         <span style="color:#e6a23c">⚠ 该表无主键，无法进行单行编辑 / 新增 / 删除</span>
         <span style="margin-left:auto;color:var(--c-text-3)">点击单元格可查看内容</span>
       </template>
       <template v-else>
-        <span style="color:var(--c-text-3)">点击单元格即可编辑；行尾「+新增行」后在表头顶浮动行填入并确认</span>
-        <span style="margin-left:auto;color:var(--c-text-3)">共 <b>{{ total }}</b> 条记录，当前第 {{ page }} / {{ totalPages }} 页</span>
+        <span style="color:var(--c-text-3)">点击单元格即可编辑；行尾「+新增行」后在表头浮动行填入并确认</span>
+        <span style="margin-left:auto;color:var(--c-text-3)">共 <b>{{ total }}</b> 条记录{{ tab.kind === 'table' ? `，当前第 ${page} / ${totalPages} 页` : '' }}</span>
       </template>
     </div>
   </div>
@@ -150,7 +162,18 @@ const props = defineProps({
   tab: { type: Object, required: true },
   connId: String
 });
-defineEmits(['export']);
+const emit = defineEmits(['export', 'rows-changed']);
+
+// 导出下拉命令分发：csv / sql
+function onExport(cmd) {
+  emit('export', {
+    database: props.tab.database,
+    name: props.tab.table,
+    type: cmd,
+    kind: props.tab.kind,
+    sql: props.tab.sql
+  });
+}
 
 const rows = ref([]);
 const columns = ref([]);
@@ -163,6 +186,9 @@ const sort = ref({});
 const columnMeta = ref([]);
 const pkColumns = ref([]);
 
+// 查询结果可编辑：kind=table 或 kind=query 且有 database+table
+const isEditable = computed(() => !!(props.tab.database && props.tab.table && (props.tab.kind === 'table' || props.tab.kind === 'query')));
+
 // --- 单元格编辑状态 ---
 // 当有值时：{ row, col, value }
 const editingCell = ref(null);
@@ -171,19 +197,17 @@ const cellInputRef = ref(null);
 // --- 新增行状态 ---
 const newRow = ref(null);        // { ...列值, _isNew: true }
 const newRowSubmitting = ref(false);
-// “确认/取消”按钮放在哪一列：最后一列（或倒数第一个非主键列）
-const newRowActionsCol = computed(() => {
-  if (!columns.value.length) return '';
-  // 如果只有1列就放那列，否则放最后一列
-  return columns.value[columns.value.length - 1];
-});
 
+const isPaginated = computed(() => props.tab.kind === 'table' || props.tab.kind === 'query');
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / size.value)));
 
 // 实际传给 el-table 的 rows = [新增行(若存在)] + 正常行
 const displayRows = computed(() => {
-  if (newRow.value) return [newRow.value, ...rows.value];
-  return rows.value;
+  const visibleRows = props.tab.kind === 'query'
+    ? rows.value.slice((page.value - 1) * size.value, page.value * size.value)
+    : rows.value;
+  if (newRow.value) return [newRow.value, ...visibleRows];
+  return visibleRows;
 });
 
 // 表加载时顺便拉一次列结构，便于判断主键 / 可空
@@ -195,6 +219,8 @@ onMounted(async () => {
     rows.value = props.tab.rows || [];
     columns.value = props.tab.columns || [];
     total.value = rows.value.length;
+    // 查询结果标签：若有 database+table，也拉取列结构用于判断主键
+    if (isEditable.value) await loadColumnMeta();
   }
 });
 
@@ -209,6 +235,16 @@ watch(() => props.tab.id, async () => {
     rows.value = props.tab.rows || [];
     columns.value = props.tab.columns || [];
     total.value = rows.value.length;
+    if (isEditable.value) await loadColumnMeta();
+  }
+});
+
+// 监听刷新信号（导入完成后由 App.vue 的 refreshActiveTableTabsIfMatch 触发）
+watch(() => props.tab.refreshAt, () => {
+  if (props.tab.kind === 'table') {
+    page.value = 1;
+    sort.value = {};
+    loadData();
   }
 });
 
@@ -240,8 +276,36 @@ async function loadData() {
   }
 }
 
-function onSizeChange() { page.value = 1; loadData(); }
-function goPage(p) { if (p < 1 || p > totalPages.value) return; page.value = p; loadData(); }
+function onSizeChange() {
+  page.value = 1;
+  if (props.tab.kind === 'table') loadData();
+  else refreshData();
+}
+function goPage(p) {
+  if (p < 1 || p > totalPages.value) return;
+  page.value = p;
+  if (props.tab.kind === 'table') loadData();
+  else refreshData();
+}
+
+// 刷新：kind=table 重新加载分页数据；kind=query 重新执行 SQL 更新本地数据
+async function refreshData() {
+  if (props.tab.kind === 'table') { await loadData(); return; }
+  if (props.tab.kind === 'query' && props.tab.sql) {
+    try {
+      const results = await api.query(props.connId || props.tab.connId, props.tab.database, props.tab.sql);
+      const sel = results.find(r => r.type === 'select');
+      if (sel) {
+        rows.value = sel.rows || [];
+        columns.value = sel.fields || columns.value;
+        total.value = rows.value.length;
+        page.value = Math.min(page.value, totalPages.value);
+        editingCell.value = null;
+        newRow.value = null;
+      }
+    } catch (e) { ElMessage.error('刷新失败: ' + e.message); }
+  }
+}
 function onSort({ prop, order }) {
   if (!order) sort.value = {};
   else sort.value = { column: prop, dir: order === 'descending' ? 'desc' : 'asc' };
@@ -252,15 +316,7 @@ function onSort({ prop, order }) {
 function colWidth(col) {
   const samples = [...rows.value, newRow.value].filter(Boolean);
   const base = Math.max(...samples.map((r) => String(r[col] == null ? '' : r[col]).length), col.length);
-  // 最后一列多给点空间放新增行的 ✓/✗
-  if (newRow.value && col === newRowActionsCol.value) {
-    return Math.max(base * 9 + 24, 180);
-  }
   return Math.max(base * 9 + 24, 90);
-}
-function colClass(col) {
-  if (newRow.value && col === newRowActionsCol.value) return 'col-new-actions';
-  return '';
 }
 function rowClass({ row }) {
   if (row._isNew) return 'row-new';
@@ -275,7 +331,7 @@ function colNull(col) {
 
 // --- 单元格点击 & 编辑 ---
 function canEdit(row, col) {
-  if (props.tab.kind !== 'table') return false;
+  if (!isEditable.value) return false;
   if (!pkColumns.value.length) return false;
   if (row._isNew) return true;
   // 主键也允许查看但不允许修改
@@ -385,7 +441,14 @@ async function confirmNewRow() {
     ElMessage.success('新增成功');
     newRow.value = null;
     editingCell.value = null;
-    await loadData();
+    // 通知左侧树更新该表行数（+1）
+    if (props.tab.database && props.tab.table) {
+      emit('rows-changed', { database: props.tab.database, table: props.tab.table, delta: 1 });
+    }
+    // kind=table: 重新加载数据；kind=query: 不重新查询，仅清空新增行表单
+    if (props.tab.kind === 'table') {
+      await loadData();
+    }
   } catch (e) {
     ElMessage.error('新增失败: ' + e.message);
   } finally {
@@ -405,13 +468,27 @@ async function confirmDelete(row, index) {
   const pkShow = pkColumns.value.map(c => `${c}=${row[c]}`).join(', ');
   try {
     await ElMessageBox.confirm(`确认删除该行？(${pkShow})`, '删除确认', {
-      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      customClass: 'row-delete-confirm',
+      cancelButtonClass: 'el-button--primary'
     });
   } catch (e) { return; }
   try {
     const res = await api.deleteRow(props.connId || props.tab.connId, props.tab.database, props.tab.table, pk);
     ElMessage.success(`删除成功 ${res.deleted} 行`);
-    await loadData();
+    // 通知左侧树更新该表行数（-deleted）
+    if (props.tab.database && props.tab.table) {
+      emit('rows-changed', { database: props.tab.database, table: props.tab.table, delta: -res.deleted });
+    }
+    // kind=table: 重新加载数据；kind=query: 本地移除该行
+    if (props.tab.kind === 'table') {
+      await loadData();
+    } else {
+      const idx = rows.value.findIndex(r => r === row);
+      if (idx >= 0) { rows.value.splice(idx, 1); total.value = rows.value.length; }
+    }
   } catch (e) {
     ElMessage.error('删除失败: ' + e.message);
   }
@@ -424,7 +501,7 @@ async function confirmDelete(row, index) {
   border-bottom: 1px solid var(--c-border); background: #fff; flex-shrink: 0;
 }
 .t-label { font-size: 13px; color: var(--c-text); font-weight: 600; }
-.table-wrap { flex: 1; overflow: hidden; padding: 0; }
+.table-wrap { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
 .table-footer {
   padding: 6px 14px; border-top: 1px solid var(--c-border);
   color: var(--c-text-3); font-size: 12px; background: #fff;
@@ -486,14 +563,29 @@ async function confirmDelete(row, index) {
 }
 .st-new { background: var(--c-primary-light); }
 
-/* 新增行最后一列：放确认/取消按钮 */
+/* 新增行操作列（固定在右侧）：放确认/取消按钮 */
 .new-row-actions {
   display: flex; align-items: center; gap: 6px;
-  justify-content: flex-end;
+  justify-content: center;
 }
 .new-row-actions .el-button { padding: 0 8px; height: 26px; font-size: 12px; border-radius: 2px; }
-:deep(.col-new-actions .cell) { display: flex; justify-content: flex-end; }
+:deep(.col-new-actions .cell) { padding: 0 6px; }
 
 /* 操作列状态 tag & del button */
 .row-ops { display: flex; align-items: center; gap: 4px; }
+
+/* 新增行固定在表头下方，不随纵向滚动 */
+:deep(.el-table tr.row-new) {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+:deep(.el-table tr.row-new > td.el-table__cell),
+:deep(.el-table tr.row-new > td) {
+  background: #E8F3FF !important;
+}
+:deep(.el-table tr.row-new:hover > td.el-table__cell),
+:deep(.el-table tr.row-new:hover > td) {
+  background: #E8F3FF !important;
+}
 </style>

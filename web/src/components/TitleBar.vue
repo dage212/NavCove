@@ -1,5 +1,5 @@
 <template>
-  <div class="title-bar">
+  <div class="title-bar" :class="{ 'is-mac': isMac }">
     <div class="tb-left">
       <img v-if="iconSrc" :src="iconSrc" class="tb-icon" alt="logo" />
       <span class="tb-title">NavCove</span>
@@ -36,8 +36,8 @@
         </el-dropdown>
       </template>
 
-      <!-- 窗口控制按钮（始终显示） -->
-      <div class="tb-actions">
+      <!-- 窗口控制按钮（Windows/Linux 显示；macOS 用原生交通灯，不渲染） -->
+      <div v-if="!isMac" class="tb-actions">
         <button class="tb-btn tb-min" title="最小化" @click.stop="onMinimize">
           <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg>
         </button>
@@ -59,7 +59,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Expand, Fold, ArrowDown, UserFilled, SwitchButton } from '@element-plus/icons-vue';
 
 defineProps({
@@ -70,6 +70,12 @@ defineProps({
 });
 
 const emit = defineEmits(['toggle-sidebar', 'open-conn', 'logout']);
+
+// 平台判断：macOS 用原生交通灯按钮，不渲染自定义窗口控制
+const isMac = computed(() => {
+  const p = window.navcove?.platform || (navigator.userAgent.includes('Mac') ? 'darwin' : '');
+  return p === 'darwin';
+});
 
 const isMax = ref(false);
 const iconSrc = '/icon.png';
@@ -116,6 +122,8 @@ function onClose()    { window.navcove?.window?.close?.(); }
   padding-left: 12px;
 }
 .tb-right { padding-left: 0; padding-right: 0; }
+/* macOS 原生交通灯按钮在左侧，留出空间避免遮挡 logo/标题 */
+.title-bar.is-mac .tb-left { padding-left: 80px; }
 .tb-icon {
   width: 20px;
   height: 20px;

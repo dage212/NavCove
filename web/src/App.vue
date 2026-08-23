@@ -77,7 +77,7 @@
 
     <div class="app-body">
       <!-- 左侧库表树 -->
-      <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, dragging: sidebarResizing }" :style="{ width: sidebarCollapsed ? '0' : sidebarWidth + 'px' }">
         <div class="sidebar-head">
           <template v-if="!sidebarCollapsed">
             <el-breadcrumb v-if="connected" class="conn-crumb" separator="/">
@@ -125,12 +125,31 @@
         </div>
       </aside>
 
+      <!-- 左右分隔拖动条 -->
+      <div
+        v-if="!sidebarCollapsed"
+        class="resizer resizer-x"
+        :class="{ active: sidebarResizing }"
+        @mousedown="onSidebarResizeStart"
+      ></div>
+
       <!-- 右侧主区 -->
       <main class="main-area">
         <!-- SQL 编辑器 -->
         <div class="editor-pane">
           <div class="editor-head">
             <span class="label">SQL 编辑器</span>
+            <el-select
+              v-model="databaseSelect"
+              size="small"
+              class="db-select"
+              placeholder="选择数据库"
+              style="width: 180px; margin-left: 12px;"
+              @change="onDbChange"
+              :disabled="!connected"
+            >
+              <el-option v-for="db in databases" :key="db" :label="db" :value="db" />
+            </el-select>
             <div class="spacer"></div>
             <el-button-group size="small">
               <el-button @click="formatSql"><el-icon><MagicStick /></el-icon><span style="margin-left:4px">美化</span></el-button>
@@ -139,14 +158,18 @@
             <el-button size="small" type="primary" @click="runSql" :loading="loading" :disabled="!connected">
               <el-icon><CaretRight /></el-icon><span style="margin-left:4px">执行</span>
             </el-button>
-            <el-button size="small" @click="runSql(true)" :loading="loading" :disabled="!connected">
-              <el-icon><Select /></el-icon><span style="margin-left:4px">执行选中</span>
-            </el-button>
           </div>
-          <div class="editor-body">
+          <div class="editor-body" :style="{ height: editorHeight + 'px' }">
             <textarea ref="editorRef"></textarea>
           </div>
         </div>
+
+        <!-- 编辑器/结果分隔拖动条 -->
+        <div
+          class="resizer resizer-y"
+          :class="{ active: editorResizing }"
+          @mousedown="onEditorResizeStart"
+        ></div>
 
         <!-- 结果区 -->
         <div class="result-pane">
@@ -154,9 +177,6 @@
             <span class="label">结果</span>
             <span v-if="resultMeta" class="meta">{{ resultMeta }}</span>
             <div class="spacer"></div>
-            <el-button v-if="hasResultRows" size="small" plain @click="exportCurrentResult">
-              <el-icon><Download /></el-icon><span style="margin-left:4px">导出 CSV</span>
-            </el-button>
           </div>
           <div class="result-body">
             <div v-if="!resultTabs.length && !loading" class="result-empty" :class="{ 'no-db': !currentDb }">
@@ -181,7 +201,7 @@
                   <span>{{ tab.label }}</span>
                   <el-icon style="margin-left:4px;vertical-align:middle" @click.stop="closeTab(i)"><Close /></el-icon>
                 </template>
-                <result-table v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'" :tab="tab" :conn-id="connection.id" @export="exportTable" />
+                <result-table v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'" :tab="tab" :conn-id="connection.id" @export="exportTable" @rows-changed="onRowsChanged" />
                 <structure-view v-else :tab="tab" :conn-id="connection.id" />
               </el-tab-pane>
             </el-tabs>
@@ -213,9 +233,6 @@
         <li class="ctx-item" @click="onCtxCommand('view-db-structure')">
           <el-icon><Menu /></el-icon><span>查看库结构</span>
         </li>
-        <li class="ctx-item" @click="onCtxCommand('edit-db')">
-          <el-icon><EditPen /></el-icon><span>编辑数据库</span>
-        </li>
         <li class="ctx-item ctx-danger" @click="onCtxCommand('drop-db')">
           <el-icon><Delete /></el-icon><span>删除数据库</span>
         </li>
@@ -228,6 +245,9 @@
         </li>
         <li class="ctx-item" @click="onCtxCommand('export-db-sql')">
           <el-icon><Connection /></el-icon><span>导出 SQL</span>
+        </li>
+        <li class="ctx-item" @click="onCtxCommand('import-db-sql')">
+          <el-icon><Document /></el-icon><span>导入 SQL</span>
         </li>
       </template>
       <!-- 表菜单 -->
@@ -258,6 +278,9 @@
         <li class="ctx-item" @click="onCtxCommand('export-sql')">
           <el-icon><Connection /></el-icon><span>导出 SQL</span>
         </li>
+        <li class="ctx-item" @click="onCtxCommand('import-sql')">
+          <el-icon><Document /></el-icon><span>导入 SQL</span>
+        </li>
       </template>
     </ul>
 
@@ -274,6 +297,30 @@
       :table="exportSqlDialog.table"
       @done="onExportSqlDone"
     />
+    <!-- 删除确认对话框（表/库共用） -->
+    <el-dialog
+      v-model="dropDialog.visible"
+      :title="dropDialog.title"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <div class="drop-confirm">
+        <el-icon class="drop-warn-icon" :size="28" color="#FF9500"><WarningFilled /></el-icon>
+        <p class="drop-warn-text">
+          {{ dropDialog.message }}
+        </p>
+        <p class="drop-hint">请输入 <b>{{ dropDialog.targetName }}</b> 以确认{{ dropDialog.kind === 'truncate' ? '清空' : '删除' }}：</p>
+        <el-input
+          v-model="dropDialog.inputName"
+          style="margin-top: 4px"
+          @keyup.enter="dropCanConfirm && confirmDrop()"
+        />
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="dropDialog.visible = false">取消</el-button>
+        <el-button :disabled="!dropCanConfirm" @click="confirmDrop">删除</el-button>
+      </template>
+    </el-dialog>
   </div>
   </div>
 </template>
@@ -403,7 +450,61 @@ function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; }
 const treeRef = ref(null);
 const loading = ref(false);
 
+// 可拖动分割条：侧栏宽度 & 编辑器高度
+const sidebarWidth = ref(272);
 const editorHeight = ref(220);
+const sidebarResizing = ref(false);
+const editorResizing = ref(false);
+
+function onSidebarResizeStart(e) {
+  if (sidebarCollapsed.value) return;
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = sidebarWidth.value;
+  sidebarResizing.value = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  function onMove(ev) {
+    const dx = ev.clientX - startX;
+    const next = Math.min(Math.max(startW + dx, 180), 560);
+    sidebarWidth.value = next;
+  }
+  function onUp() {
+    sidebarResizing.value = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function onEditorResizeStart(e) {
+  e.preventDefault();
+  const startY = e.clientY;
+  const startH = editorHeight.value;
+  editorResizing.value = true;
+  document.body.style.cursor = 'row-resize';
+  document.body.style.userSelect = 'none';
+  function onMove(ev) {
+    const dy = ev.clientY - startY;
+    const next = Math.min(Math.max(startH + dy, 80), window.innerHeight - 220);
+    editorHeight.value = next;
+  }
+  function onUp() {
+    editorResizing.value = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    // 拖动结束后刷新 CodeMirror，避免尺寸错位
+    if (cmInstance) cmInstance.refresh();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
 const hasResultRows = computed(() => {
   const tab = resultTabs.value.find((t) => t.id === activeTab.value);
   return !!(tab && tab.rows && tab.rows.length);
@@ -412,6 +513,40 @@ const hasResultRows = computed(() => {
 const connDialogVisible = ref(false);
 const importDialog = reactive({ visible: false, database: '', table: '', tables: [] });
 const treeProps = { label: 'label', children: 'children', isLeaf: 'isLeaf' };
+
+function toggleSqlComment(cm) {
+  const PREFIX = '-- ';
+  if (cm.somethingSelected()) {
+    const sel = cm.listSelections()[0];
+    const startLine = Math.min(sel.anchor.line, sel.head.line);
+    const endLine = Math.max(sel.anchor.line, sel.head.line);
+    const lines = [];
+    let allCommented = true;
+    for (let i = startLine; i <= endLine; i++) {
+      const text = cm.getLine(i);
+      lines.push(text);
+      if (!text.trimStart().startsWith(PREFIX)) allCommented = false;
+    }
+    const newLines = lines.map((t) => {
+      if (allCommented) return t.replace(/^(\s*)-- /, '$1');
+      const trimmed = t.trimStart();
+      const indent = t.slice(0, t.length - trimmed.length);
+      return indent + PREFIX + trimmed;
+    });
+    cm.replaceRange(newLines.join('\n'), { line: startLine, ch: 0 }, { line: endLine, ch: cm.getLine(endLine).length }, 'toggleComment');
+    cm.setSelection({ line: startLine, ch: 0 }, { line: endLine, ch: cm.getLine(endLine).length });
+  } else {
+    const cur = cm.getCursor();
+    const line = cm.getLine(cur.line);
+    const trimmed = line.trimStart();
+    const indent = line.slice(0, line.length - trimmed.length);
+    if (trimmed.startsWith(PREFIX)) {
+      cm.replaceRange(line.replace(/^(\s*)-- /, '$1'), { line: cur.line, ch: 0 }, { line: cur.line, ch: line.length });
+    } else {
+      cm.replaceRange(indent + PREFIX + trimmed, { line: cur.line, ch: 0 }, { line: cur.line, ch: line.length });
+    }
+  }
+}
 
 function initEditor() {
   if (editorInited || !editorRef.value) return;
@@ -431,7 +566,9 @@ function initEditor() {
       'Tab': (cm) => {
         if (cm.somethingSelected()) cm.indentSelection('add');
         else cm.replaceSelection('  ', 'end');
-      }
+      },
+      'Ctrl-/': toggleSqlComment,
+      'Cmd-/': toggleSqlComment
     }
   });
   cmInstance.setValue('-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
@@ -483,6 +620,7 @@ async function onConnected(conn) {
     resultTabs: [],
     activeTab: '',
     resultMeta: '',
+    databaseSelect: '',
     sql: ''
   };
   connTabs.value.push(newTab);
@@ -499,6 +637,7 @@ async function onConnected(conn) {
   if (!db) return;
   currentDb.value = db;
   databaseSelect.value = db;
+  newTab.databaseSelect = db;
   const dbKey = 'db:' + db;
   // 注意：不要在拉到表之前就设置 expandedKeys，否则 el-tree 会触发 loadNode 自动加载，
   // 后面我们再用 store.append 填充就会和 loadNode 的结果重复
@@ -508,12 +647,9 @@ async function onConnected(conn) {
   try {
     tables = await api.listTables(connection.value.id, db);
   } catch (e) {}
-  // 填充编辑器默认 SQL（根据是否有表）
-  const defaultSql = tables.length
-    ? `USE \`${db}\`;\nSELECT * FROM \`${tables[0].name}\` LIMIT 50;\n`
-    : `USE \`${db}\`;\nSHOW TABLES;\n`;
-  newTab.sql = defaultSql;
-  if (cmInstance) cmInstance.setValue(defaultSql);
+  // 编辑器默认为空内容
+  newTab.sql = '';
+  if (cmInstance) cmInstance.setValue('');
   // 如果有表，自动打开第一张表的数据
   if (tables.length) {
     const first = tables[0];
@@ -557,7 +693,7 @@ function switchConnTab(id) {
   if (id === activeConnId.value) return;
   saveCurrentSql();
   activeConnId.value = id;
-  // 切换后加载目标 tab 的 sql 到编辑器
+  databaseSelect.value = curConn.value?.databaseSelect || curConn.value?.currentDb || '';
   nextTick(() => {
     if (cmInstance && curConn.value) {
       cmInstance.setValue(curConn.value.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
@@ -610,17 +746,18 @@ async function loadNode(node, resolve) {
 function onNodeClick(data) {
   if (data.type === 'database') {
     currentDb.value = data.name;
-    databaseSelect.value = data.name;
-    insertText(`USE \`${data.name}\`;`);
+    currentTable.value = '';
   } else if (data.type === 'table') {
     currentDb.value = data.database;
-    databaseSelect.value = data.database;
     currentTable.value = data.name;
     viewTableData(data);
   }
 }
 
-function onDbChange(val) { currentDb.value = val; }
+function onDbChange(val) {
+  if (curConn.value) curConn.value.databaseSelect = val || '';
+  if (val) ElMessage.success({ message: `已切换到数据库: ${val}`, duration: 1500 });
+}
 
 function viewTableData(data) {
   currentDb.value = data.database;
@@ -638,23 +775,38 @@ function insertText(text) {
   cmInstance.focus();
 }
 
-async function runSql(selectedOnly = false) {
+// 从 SELECT SQL 中解析出表名（仅支持单表查询，含 JOIN 则返回 null）
+function parseTableName(sql, fallbackDb) {
+  if (!sql) return null;
+  const trimmed = sql.trim().replace(/;$/, '').trim();
+  if (/\bjoin\b/i.test(trimmed)) return null;
+  const m = trimmed.match(/\bfrom\s+(?:`?(\w+)`?\s*\.\s*)?`?(\w+)`?/i);
+  if (!m) return null;
+  const database = (m[1] || fallbackDb || '').replace(/`/g, '') || null;
+  const table = m[2].replace(/`/g, '');
+  if (!table) return null;
+  return { database, table };
+}
+
+async function runSql() {
   if (!connected.value) { ElMessage.warning('请先连接数据库'); return; }
-  let sql = '';
-  if (selectedOnly && cmInstance.getSelection()) sql = cmInstance.getSelection();
-  else sql = cmInstance.getValue();
+  const execDb = databaseSelect.value;
+  if (!execDb) { ElMessage.warning('请先在 SQL 编辑器下拉框中选择数据库'); return; }
+  const sql = cmInstance.getValue();
   if (!sql || !sql.trim()) { ElMessage.warning('SQL 不能为空'); return; }
   loading.value = true;
   resultMeta.value = '';
   try {
-    const results = await api.query(connection.value.id, currentDb.value || databaseSelect.value, sql);
+    const results = await api.query(connection.value.id, execDb, sql);
     if (!results.length) { ElMessage.success('执行完成'); return; }
+    const tableInfo = parseTableName(sql, execDb);
     const tabs = results.map((r, i) => {
       if (r.type === 'select') {
         return {
           id: 'tab_' + Date.now() + '_' + i, kind: 'query',
           label: `结果 ${i + 1} (${r.rows.length} 行)`,
-          columns: r.fields, rows: r.rows, affected: r.affected
+          columns: r.fields, rows: r.rows, affected: r.affected,
+          database: tableInfo?.database, table: tableInfo?.table, sql
         };
       } else {
         return {
@@ -725,29 +877,35 @@ function triggerDownload(url, filename) {
   document.body.removeChild(a);
 }
 
-function exportTable(data) {
-  if (!data || !data.name) return;
+async function exportTable(data) {
+  if (!data) return;
   const db = data.database || currentDb.value;
-  const url = api.exportTableUrl(connection.value.id, db, data.name);
+  const connId = connection.value.id;
+  // 查询结果导出（query 类型：按 SELECT 语句导出结果集）
+  if (data.kind === 'query' && data.sql) {
+    try {
+      if (data.type === 'sql') {
+        const blob = await api.exportQuerySql(connId, db, data.sql, data.name);
+        downloadBlob(blob, `${data.name || 'query_result'}.sql`);
+      } else {
+        const blob = await api.exportQueryCsv(connId, db, data.sql);
+        downloadBlob(blob, 'query_result.csv');
+      }
+      ElMessage.success('导出成功');
+    } catch (e) { ElMessage.error('导出失败: ' + e.message); }
+    return;
+  }
+  // 整表导出（table 类型）
+  if (!data.name) return;
+  if (data.type === 'sql') {
+    const url = api.exportSqlTableUrl(connId, db, data.name, { withSchema: true, withData: true });
+    triggerDownload(url, `${db}_${data.name}.sql`);
+    ElMessage.success('开始导出 ' + data.name + ' SQL');
+    return;
+  }
+  const url = api.exportTableUrl(connId, db, data.name);
   triggerDownload(url, `${db}_${data.name}.csv`);
   ElMessage.success('开始导出 ' + data.name);
-}
-
-async function exportCurrentResult() {
-  const tab = resultTabs.value.find((t) => t.id === activeTab.value);
-  if (!tab) return;
-  try {
-    if (tab.kind === 'table' && tab.connId && tab.database && tab.table) {
-      const url = api.exportTableUrl(tab.connId, tab.database, tab.table);
-      triggerDownload(url, `${tab.database}_${tab.table}.csv`);
-      return;
-    }
-    const sql = cmInstance && cmInstance.getValue();
-    if (!sql) { ElMessage.warning('无可导出内容'); return; }
-    const blob = await api.exportQueryCsv(tab.connId || connection.value.id, tab.database || currentDb.value, sql);
-    downloadBlob(blob, 'query_result.csv');
-    ElMessage.success('导出成功');
-  } catch (e) { ElMessage.error('导出失败: ' + e.message); }
 }
 
 function downloadBlob(blob, filename) {
@@ -798,17 +956,26 @@ async function refreshActiveTableTabsIfMatch(db, tableName) {
   const targets = resultTabs.value.filter(
     (t) => t.kind === 'table' && t.database === db && (!tableName || t.table === tableName)
   );
+  // 通过更新 refreshAt 时间戳触发 ResultTable 内部 watch -> loadData 重新拉取数据
+  // ResultTable 用内部 ref（rows/columns/total），直接改 tab 属性不会触发更新
+  const now = Date.now();
   for (const t of targets) {
-    try {
-      const res = await api.getTableData(t.connId, t.database, t.table, 1, t.pageSize);
-      const existing = resultTabs.value.find((x) => x.id === t.id);
-      if (existing) Object.assign(existing, {
-        rows: res.rows,
-        columns: res.columns,
-        total: res.total,
-        page: 1
-      });
-    } catch (e) {}
+    const existing = resultTabs.value.find((x) => x.id === t.id);
+    if (existing) existing.refreshAt = now;
+  }
+}
+
+// 表数据增删后，增量更新左侧树对应表节点的行数显示
+function onRowsChanged({ database, table, delta }) {
+  if (!database || !table || !delta) return;
+  const tree = treeRef.value;
+  if (!tree) return;
+  const key = 'tb:' + database + '.' + table;
+  const node = tree.getNode(key);
+  if (node && node.data) {
+    const cur = node.data.rows;
+    node.data.rows = (cur == null ? 0 : cur) + delta;
+    if (node.data.rows < 0) node.data.rows = 0;
   }
 }
 
@@ -890,7 +1057,7 @@ async function onDatabaseCreated(payload) {
         kind: 'table', connId: connection.value.id, database: newDb, table: first.name, label: first.name
       });
     } else {
-      if (cmInstance) cmInstance.setValue(`USE \`${newDb}\`;\nSHOW TABLES;\n`);
+      if (cmInstance) cmInstance.setValue('');
     }
   } catch (e) {}
 }
@@ -902,6 +1069,24 @@ const exportSqlDialog = reactive({
   database: '',
   table: ''
 });
+
+// 删除确认对话框（表/库共用）
+const dropDialog = reactive({
+  visible: false,
+  title: '删除确认',
+  message: '',
+  targetName: '',
+  inputName: '',
+  kind: '',     // 'table' | 'database'
+  data: null
+});
+const dropCanConfirm = computed(() => dropDialog.inputName !== '' && dropDialog.inputName === dropDialog.targetName);
+function confirmDrop() {
+  if (dropDialog.kind === 'table') doDropTable(dropDialog.data);
+  else if (dropDialog.kind === 'database') doDropDatabase(dropDialog.data);
+  else if (dropDialog.kind === 'truncate') doTruncateTable(dropDialog.data);
+  dropDialog.visible = false;
+}
 function openExportSqlTableDialog(data) {
   const database = data && data.database ? data.database : (data && data.name ? data.database : currentDb.value);
   const table = data && data.name ? data.name : '';
@@ -976,6 +1161,7 @@ async function onCtxCommand(cmd) {
     case 'import': openImport(data); break;
     case 'export': exportTable(data); break;
     case 'export-sql': openExportSqlTableDialog(data); break;
+    case 'import-sql': handleImportSql(data); break;
     case 'view-table-structure': openTableStructureTab(data); break;
     case 'rename': handleRenameTable(data); break;
     case 'copy': handleCopyTable(data); break;
@@ -984,11 +1170,11 @@ async function onCtxCommand(cmd) {
     // 数据库操作
     case 'create-db': openCreateDatabaseDialog(); break;
     case 'view-db-structure': openDbStructureTab(data); break;
-    case 'edit-db': handleEditDatabase(data); break;
     case 'drop-db': handleDropDatabase(data); break;
     case 'import-db': handleDatabaseImport(data); break;
     case 'export-db': handleDatabaseExport(data); break;
     case 'export-db-sql': openExportSqlDatabaseDialog(data); break;
+    case 'import-db-sql': handleImportSql(data); break;
   }
 }
 
@@ -997,38 +1183,20 @@ async function handleCreateDatabase() {
   openCreateDatabaseDialog();
 }
 
-// 编辑数据库（修改字符集）
-async function handleEditDatabase(data) {
-  try {
-    const info = await api.getDatabaseInfo(connection.value.id, data.name);
-    const cur = info?.charset || 'utf8mb4';
-    const res = await ElMessageBox.prompt('请输入默认字符集', `编辑数据库「${data.name}」`, {
-      confirmButtonText: '确定', cancelButtonText: '取消',
-      inputValue: cur,
-      inputPattern: /^[A-Za-z0-9_]+$/,
-      inputErrorMessage: '字符集名不合法'
-    });
-    const charset = res.value.trim();
-    if (charset === cur) { ElMessage.info('字符集未变化'); return; }
-    await api.alterDatabase(connection.value.id, data.name, charset);
-    ElMessage.success(`数据库「${data.name}」字符集已更新为 ${charset}`);
-  } catch (e) {
-    if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('编辑失败: ' + (e.message || e));
-  }
-}
-
 // 删除数据库
-async function handleDropDatabase(data) {
+function handleDropDatabase(data) {
+  dropDialog.kind = 'database';
+  dropDialog.data = data;
+  dropDialog.targetName = data.name;
+  dropDialog.inputName = '';
+  dropDialog.title = '删除数据库确认';
+  dropDialog.message = `确认删除数据库「${data.name}」？该库内所有表和数据将全部删除，不可恢复！`;
+  dropDialog.visible = true;
+}
+async function doDropDatabase(data) {
   try {
-    await ElMessageBox.confirm(
-      `确认删除数据库「${data.name}」？该库内所有表和数据将全部删除，不可恢复！`,
-      '危险操作：删除数据库',
-      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
-    );
     await api.dropDatabase(connection.value.id, data.name);
     ElMessage.success(`数据库「${data.name}」已删除`);
-    // 关闭该库下所有 tab
     resultTabs.value = resultTabs.value.filter((t) => t.database !== data.name);
     if (!resultTabs.value.find((t) => t.id === activeTab.value)) activeTab.value = resultTabs.value[0]?.id || '';
     if (currentDb.value === data.name) { currentDb.value = ''; currentTable.value = ''; }
@@ -1070,6 +1238,34 @@ async function handleDatabaseExport(data) {
   } catch (e) {
     ElMessage.error('导出失败: ' + (e.message || e));
   }
+}
+
+// 导入 SQL 文件
+function handleImportSql(data) {
+  const database = data.type === 'database' ? data.name : (data.database || currentDb.value);
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.sql';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      if (!content.trim()) { ElMessage.warning('SQL 文件为空'); return; }
+      const results = await api.query(connection.value.id, database, content);
+      const hasError = results.some(r => r.type === 'error');
+      if (hasError) {
+        const errMsg = results.find(r => r.type === 'error')?.message || '执行出错';
+        ElMessage.error(`导入失败: ${errMsg}`);
+      } else {
+        ElMessage.success(`SQL 文件「${file.name}」导入成功`);
+        refreshTree();
+      }
+    } catch (e) {
+      ElMessage.error('导入失败: ' + (e.message || e));
+    }
+  };
+  input.click();
 }
 
 // 重命名表
@@ -1114,33 +1310,39 @@ async function handleCopyTable(data) {
 }
 
 // 清空表
-async function handleTruncateTable(data) {
+function handleTruncateTable(data) {
+  dropDialog.kind = 'truncate';
+  dropDialog.data = data;
+  dropDialog.targetName = data.name;
+  dropDialog.inputName = '';
+  dropDialog.title = '清空表确认';
+  dropDialog.message = `确认清空表「${data.name}」的所有数据？该操作不可恢复！`;
+  dropDialog.visible = true;
+}
+async function doTruncateTable(data) {
   try {
-    await ElMessageBox.confirm(
-      `确认清空表「${data.name}」的所有数据？该操作不可恢复！`,
-      '危险操作：清空表',
-      { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
-    );
     await api.truncateTable(connection.value.id, data.database, data.name);
     ElMessage.success(`表「${data.name}」已清空`);
     refreshTree();
   } catch (e) {
-    if (e === 'cancel' || e?.message === 'cancel') return;
     ElMessage.error('清空失败: ' + (e.message || e));
   }
 }
 
 // 删除表
-async function handleDropTable(data) {
+function handleDropTable(data) {
+  dropDialog.kind = 'table';
+  dropDialog.data = data;
+  dropDialog.targetName = data.name;
+  dropDialog.inputName = '';
+  dropDialog.title = '删除表确认';
+  dropDialog.message = `确认删除表「${data.name}」？表结构和数据将全部删除，不可恢复！`;
+  dropDialog.visible = true;
+}
+async function doDropTable(data) {
   try {
-    await ElMessageBox.confirm(
-      `确认删除表「${data.name}」？表结构和数据将全部删除，不可恢复！`,
-      '危险操作：删除表',
-      { type: 'error', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
-    );
     await api.dropTable(connection.value.id, data.database, data.name);
     ElMessage.success(`表「${data.name}」已删除`);
-    // 关闭对应 tab
     resultTabs.value = resultTabs.value.filter((t) => !(t.database === data.database && t.table === data.name));
     if (!resultTabs.value.find((t) => t.id === activeTab.value)) activeTab.value = resultTabs.value[0]?.id || '';
     refreshTree();

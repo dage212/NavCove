@@ -146,6 +146,17 @@ body {
 
 .app-body { flex: 1; display: flex; overflow: hidden; }
 
+/* ================ 可拖动分隔条 ================ */
+.resizer { flex-shrink: 0; position: relative; z-index: 6; background: transparent; transition: background .15s ease; }
+.resizer-x { width: 6px; cursor: col-resize; }
+.resizer-y { height: 6px; cursor: row-resize; }
+.resizer:hover, .resizer.active { background: var(--c-primary-light); }
+.resizer-x::before, .resizer-y::before {
+  content: ''; position: absolute; inset: -3px;
+}
+.resizer-x::before { cursor: col-resize; }
+.resizer-y::before { cursor: row-resize; }
+
 /* ================ 侧边栏（浅白+商务蓝激活） ================ */
 .sidebar {
   width: 272px;
@@ -157,6 +168,7 @@ body {
   transition: width .25s ease;
   overflow: hidden;
 }
+.sidebar.dragging { transition: none; }
 .sidebar.collapsed { width: 0; border-right: none; }
 .sidebar.collapsed .sidebar-head,
 .sidebar.collapsed .sidebar-tree { opacity: 0; pointer-events: none; }
@@ -211,8 +223,26 @@ body {
 .ctx-item .el-icon { font-size: 14px; }
 .ctx-divider { height: 1px; margin: 4px 8px; background: var(--c-border); }
 
+/* 删除确认对话框 */
+.drop-confirm { text-align: center; padding: 8px 0; }
+.drop-warn-icon { margin-bottom: 12px; }
+.drop-warn-text { font-size: 14px; color: var(--c-text); line-height: 1.6; margin-bottom: 16px; }
+.drop-hint { font-size: 13px; color: var(--c-text-2); text-align: left; margin-bottom: 4px; }
+
+/* 行删除确认弹窗（ElMessageBox）：取消蓝色、删除灰色，与表删除弹窗保持一致 */
+.row-delete-confirm .el-message-box__btns button:last-child {
+  background-color: #fff !important;
+  border-color: var(--c-border) !important;
+  color: var(--c-text) !important;
+}
+.row-delete-confirm .el-message-box__btns button:last-child:hover {
+  background-color: #f5f7fa !important;
+  color: var(--c-primary) !important;
+  border-color: var(--c-primary-light) !important;
+}
+
 /* ================ 主区域 ================ */
-.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--c-bg); padding: 12px 12px 0 12px; gap: 12px; }
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--c-bg); padding: 12px 12px 0 12px; gap: 0; }
 .main-toolbar {
   height: 44px;
   background: var(--c-panel);
@@ -243,11 +273,41 @@ body {
 }
 .editor-head .label { font-size: 12px; color: var(--c-text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
 .editor-head .spacer { flex: 1; }
+/* 数据库下拉选择 */
+.editor-head .db-select .el-input__wrapper {
+  background: var(--c-primary);
+  box-shadow: none !important;
+  border: none;
+  padding: 0 8px 0 12px;
+  height: 32px;
+  border-radius: 6px;
+}
+.editor-head .db-select .el-input__inner {
+  color: #fff !important; font-weight: 600; font-size: 14px;
+  cursor: pointer;
+  -webkit-text-fill-color: #fff;
+}
+.editor-head .db-select .el-input__inner::placeholder { color: rgba(255,255,255,.7); }
+.editor-head .db-select .el-select__caret {
+  color: #fff !important;
+  font-size: 18px !important;
+  width: 20px;
+  opacity: 1 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.editor-head .db-select .el-input__wrapper:hover { background: var(--c-primary-light); }
+.editor-head .db-select.is-disabled .el-input__wrapper {
+  background: var(--c-bg-gray); border: 1px solid var(--c-border);
+}
+.editor-head .db-select.is-disabled .el-input__inner { color: var(--c-text-3) !important; -webkit-text-fill-color: var(--c-text-3); }
+.editor-head .db-select.is-disabled .el-select__caret { color: var(--c-text-3) !important; }
 .editor-body { height: 200px; overflow: hidden; border-top: 1px solid var(--c-divider); }
 
 /* ================ 结果区 ================ */
 .result-pane {
-  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
   background: var(--c-panel);
   border: 1px solid var(--c-border);
   border-radius: 4px;
@@ -263,7 +323,7 @@ body {
 .result-head .label { font-size: 12px; color: var(--c-text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
 .result-head .meta { font-size: 12px; color: var(--c-text-2); }
 .result-head .spacer { flex: 1; }
-.result-body { flex: 1; overflow: auto; padding: 0; }
+.result-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .result-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--c-text-3); gap: 12px; }
 .result-empty .empty-icon-wrap {
   width: 80px; height: 80px; border-radius: 50%;
@@ -302,11 +362,11 @@ body {
 .data-table { font-size: 13px; }
 .data-table .el-table__header th { background: #F7F8FA; color: var(--c-text-2); font-weight: 600; }
 .data-table .cell { white-space: nowrap; }
-.result-tabs { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.result-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .result-tabs .el-tabs__header { margin: 0 14px; border-bottom: 1px solid var(--c-divider); }
 .result-tabs .el-tabs__item.is-active { color: var(--c-primary); }
 .result-tabs .el-tabs__active-bar { background-color: var(--c-primary); }
-.result-tabs .el-tabs__content { flex: 1; overflow: hidden; }
+.result-tabs .el-tabs__content { flex: 1; min-height: 0; overflow: hidden; }
 .result-tab-pane { height: 100%; display: flex; flex-direction: column; }
 
 /* CodeMirror */

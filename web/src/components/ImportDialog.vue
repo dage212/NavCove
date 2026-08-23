@@ -256,12 +256,11 @@ async function startOrResumeUpload() {
       doneSet.value = new Set(initData.doneChunks);
       chunkDone.value = doneSet.value.size;
     }
-    const needList = (initData.needChunks && initData.needChunks.length)
-      ? initData.needChunks.slice()
-      : Array.from({ length: totalChunks.value }, (_, i) => i);
+    // needChunks 由后端返回缺失切片列表：空数组表示全部已上传，直接进入合并/导入流程
+    const needList = (initData.needChunks || []).slice();
 
-    if (!needList.length && initData.merged) {
-      // 已合并过未导入 -> 直接 merge 再次触发导入（importFn 会判重执行）
+    if (!needList.length) {
+      // 所有切片已上传，触发合并 + 导入（mergeUpload 内部对已合并的会跳过合并步骤直接重新导入）
       await doMerge();
       return;
     }
@@ -331,7 +330,7 @@ async function doMerge() {
       database: props.database,
       table: targetTable.value,
       replace: mode.value === 'replace',
-      batchSize: 1000
+      batchSize: 200
     });
     merging.value = false;
     const imported = merged.imported || { inserted: 0, count: 0, columns: [] };
@@ -342,7 +341,7 @@ async function doMerge() {
   } catch (e) {
     merging.value = false;
     lastError.value = e.message || String(e);
-    ElMessage.error('合并/导入失败：' + lastError.value);
+    ElMessage.error(lastError.value);
   }
 }
 </script>

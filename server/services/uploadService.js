@@ -20,6 +20,12 @@ const crypto = require('crypto');
 const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// 临时文件日志（调试 merge 崩溃问题）
+const logFile = path.join(UPLOAD_DIR, 'debug.log');
+function debugLog(msg) {
+  try { fs.appendFileSync(logFile, new Date().toISOString() + ' ' + msg + '\n'); } catch (e) {}
+}
+
 function metaPath(uploadId) {
   return path.join(UPLOAD_DIR, uploadId + '.json');
 }
@@ -122,6 +128,7 @@ function saveChunk({ uploadId, index, buffer }) {
  * @returns {Promise<{mergedFilePath,size,imported?:any}>}
  */
 async function mergeUpload({ uploadId, importFn }) {
+  debugLog('[mergeUpload] start, uploadId: ' + uploadId);
   const meta = readMeta(uploadId);
   if (!meta) { const e = new Error('uploadId 不存在'); e.status = 404; throw e; }
   const miss = missingChunks(meta);
@@ -132,33 +139,44 @@ async function mergeUpload({ uploadId, importFn }) {
     throw e;
   }
   if (!meta.mergedFilePath) {
+    debugLog('[mergeUpload] merging chunks, totalChunks: ' + meta.totalChunks);
     const mergedDir = UPLOAD_DIR;
     const mergedFile = path.join(mergedDir, `${uploadId}_${meta.fileName}`);
-    // 按顺序把切片写入同一个合并文件
-    const writeStream = fs.createWriteStream(mergedFile);
+    // 同步合并切片（避免 createWriteStream 文件句柄未释放导致后续读取卡住）
+    const chunks = [];
     for (let i = 0; i < meta.totalChunks; i++) {
       const cPath = chunkFile(uploadId, i);
       const buf = fs.readFileSync(cPath);
-      await new Promise((resolve, reject) => {
-        writeStream.write(buf, (err) => (err ? reject(err) : resolve()));
-      });
+      chunks.push(buf);
+      debugLog('[mergeUpload] chunk ' + i + ' size: ' + buf.length);
     }
-    await new Promise((resolve, reject) => {
-      writeStream.end((err) => (err ? reject(err) : resolve()));
-    });
+    fs.writeFileSync(mergedFile, Buffer.concat(chunks));
     meta.mergedFilePath = mergedFile;
     meta.merged = true;
     writeMeta(meta);
+    debugLog('[mergeUpload] merge done, file: ' + mergedFile + ', size: ' + fs.statSync(mergedFile).size);
   }
   const stat = fs.statSync(meta.mergedFilePath);
   const result = { mergedFilePath: meta.mergedFilePath, size: stat.size };
   if (typeof importFn === 'function') {
-    result.imported = await importFn(meta.mergedFilePath);
-    meta.imported = true;
-    writeMeta(meta);
+    debugLog('[mergeUpload] calling importFn, file: ' + meta.mergedFilePath);
+    try {
+      result.imported = await importFn(meta.mergedFilePath);
+      debugLog('[mergeUpload] importFn done, inserted: ' + (result.imported && result.imported.inserted));
+      meta.imported = true;
+      writeMeta(meta);
+    } catch (e) {
+      debugLog('[mergeUpload] importFn FAILED: ' + e.message + ' | code: ' + e.code + ' | sqlMessage: ' + e.sqlMessage);
+      throw e;
+    } finally {
+      // 不管导入成功与否，最后都清理缓存文件（切片、meta、合并文件）
+      cleanup(uploadId);
+      debugLog('[mergeUpload] cleanup done');
+    }
+  } else {
+    try { fs.rmSync(chunkDir(uploadId), { recursive: true, force: true }); } catch (e) {}
   }
-  // 合并后清理切片（保留 meta + mergedFile 方便重复导入或查错）
-  try { fs.rmSync(chunkDir(uploadId), { recursive: true, force: true }); } catch (e) {}
+  debugLog('[mergeUpload] return result');
   return result;
 }
 

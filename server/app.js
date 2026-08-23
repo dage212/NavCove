@@ -5,8 +5,25 @@ const bodyParser = require('koa-bodyparser');
 const path = require('path');
 const koaStatic = require('koa-static');
 const router = require('./routes');
+const db = require('./db/sqlite');
+const poolMgr = require('./db/pool');
 
 const app = new Koa();
+
+// 启动时从 SQLite 恢复连接池（避免 nodemon 重启后前端需要重新连接）
+try {
+  const conns = db.prepare('SELECT * FROM connections').all();
+  for (const c of conns) {
+    try {
+      poolMgr.registerConnection(c.id, c);
+      console.log(`[sqlAdmin] 恢复连接池: ${c.name} (${c.host}:${c.port})`);
+    } catch (e) {
+      console.error(`[sqlAdmin] 恢复连接 ${c.name} 失败:`, e.message);
+    }
+  }
+} catch (e) {
+  console.error('[sqlAdmin] 恢复连接池失败:', e.message);
+}
 
 app.use(cors());
 app.use(bodyParser({ enableTypes: ['json', 'form', 'text'], jsonLimit: '50mb' }));
@@ -59,4 +76,12 @@ const server = app.listen(PORT, () => {
 
 app.on('error', (err) => {
   console.error('[NavCove][error]', err.message);
+});
+
+// 捕获未处理的 Promise rejection 和同步异常，防止进程崩溃导致连接重置
+process.on('unhandledRejection', (reason) => {
+  console.error('[NavCove][unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[NavCove][uncaughtException]', err && err.stack ? err.stack : err);
 });

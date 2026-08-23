@@ -144,6 +144,41 @@ async function exportQueryCsv(connId, database, sql) {
   }
 }
 
+// 导出查询结果为 SQL（INSERT 语句）
+// tableName 为可选目标表名（单表查询时由前端解析传入）；缺省用 query_result
+async function exportQuerySql(connId, database, sql, tableName) {
+  const pool = poolMgr.getPool(connId);
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    if (database) await conn.changeUser({ database });
+    const [rows] = await conn.query(sql);
+    let out = '\ufeff';
+    out += '-- SQL Dump: query result\n';
+    out += `-- Generated at ${new Date().toISOString()}\n`;
+    out += 'SET NAMES utf8mb4;\n';
+    out += 'SET FOREIGN_KEY_CHECKS = 0;\n\n';
+    if (!rows.length) {
+      out += '-- 无数据\n';
+      return out;
+    }
+    const fields = Object.keys(rows[0]);
+    const colNames = fields.map((f) => mysqlEscapeId(f)).join(', ');
+    const quotedTable = mysqlEscapeId(tableName || 'query_result');
+    const columns = fields.map((name) => ({ name }));
+    const maxRowsPerInsert = 100;
+    for (let i = 0; i < rows.length; i += maxRowsPerInsert) {
+      const chunk = rows.slice(i, i + maxRowsPerInsert);
+      const valuesList = chunk.map((r) => rowToValuesList(columns, r)).join(',\n');
+      out += `INSERT INTO ${quotedTable} (${colNames}) VALUES\n${valuesList};\n`;
+    }
+    out += '\nSET FOREIGN_KEY_CHECKS = 1;\n';
+    return out;
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
 // 流式导出表数据为 CSV（大数据量方案）
 // 返回一个可读流：BOM + CSV 行流，调用方直接 pipe 到 HTTP 响应
 function exportTableCsvStream(connId, database, table, { limit } = {}) {
@@ -249,9 +284,32 @@ async function importTableCsv(connId, database, table, csvText, { replace = fals
   if (!rows.length) return { inserted: 0 };
 
   const columns = Object.keys(rows[0]);
+
+  // 查询 datetime/timestamp/date 列，导入时对非标准日期格式做转换
+  let dateCols = new Set();
+  try {
+    const [colRows] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+       AND DATA_TYPE IN ('datetime','timestamp','date')`,
+      [database, table]
+    );
+    dateCols = new Set(colRows.map((r) => r.COLUMN_NAME));
+  } catch (e) {}
+
   const colSql = columns.map(mysqlEscapeId).join(', ');
-  const sql = `${replace ? 'REPLACE' : 'INSERT'} INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
-  const values = rows.map((r) => columns.map((c) => (r[c] === '' || r[c] == null ? null : r[c])));
+  let sql;
+  if (replace) {
+    const updateSql = columns.map((c) => `${mysqlEscapeId(c)}=VALUES(${mysqlEscapeId(c)})`).join(', ');
+    sql = `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ? ON DUPLICATE KEY UPDATE ${updateSql}`;
+  } else {
+    sql = `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
+  }
+  const values = rows.map((r) => columns.map((c) => {
+    const raw = (r[c] === '' || r[c] == null ? null : r[c]);
+    if (raw != null && dateCols.has(c)) return normalizeDate(raw);
+    return raw;
+  }));
   const [res] = await pool.query(sql, [values]);
   return { inserted: res.affectedRows, columns, count: rows.length };
 }
@@ -267,9 +325,33 @@ async function importTableCsv(connId, database, table, csvText, { replace = fals
  * @param {number} opt.batchSize 每批行数，默认 1000
  * @returns {Promise<{inserted:number,count:number,columns:string[]}>}
  */
-function importCsvFileStream(connId, database, table, filePath, { replace = false, batchSize = 1000 } = {}) {
+async function importCsvFileStream(connId, database, table, filePath, { replace = false, batchSize = 1000 } = {}) {
+  const pool = poolMgr.getPool(connId);
+  // 查询 datetime/timestamp/date 列，导入时对非标准日期格式做转换（如 DD/MM/YYYY）
+  let dateCols = new Set();
+  try {
+    const [colRows] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+       AND DATA_TYPE IN ('datetime','timestamp','date')`,
+      [database, table]
+    );
+    dateCols = new Set(colRows.map((r) => r.COLUMN_NAME));
+  } catch (e) {}
+  // 临时文件日志
+  const debugLog = (msg) => { try { require('fs').appendFileSync(require('path').join(__dirname, '..', 'data', 'uploads', 'debug.log'), new Date().toISOString() + ' [import] ' + msg + '\n'); } catch (e) {} };
+  debugLog('importCsvFileStream start, filePath: ' + filePath + ', batchSize: ' + batchSize);
+
+  // 测试连接池是否正常
+  try {
+    const [testRes] = await pool.query('SELECT 1 AS test');
+    debugLog('pool.query SELECT 1 OK: ' + JSON.stringify(testRes));
+  } catch (e) {
+    debugLog('pool.query SELECT 1 FAILED: ' + e.message);
+    throw e;
+  }
+
   return new Promise((resolve, reject) => {
-    const pool = poolMgr.getPool(connId);
     const quotedDb = mysqlEscapeId(database);
     const quotedTable = mysqlEscapeId(table);
     const fs = require('fs');
@@ -289,18 +371,35 @@ function importCsvFileStream(connId, database, table, filePath, { replace = fals
 
     function buildInsertSql(cols) {
       const colSql = cols.map(mysqlEscapeId).join(', ');
-      return `${replace ? 'REPLACE' : 'INSERT'} INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
+      if (replace) {
+        // 使用 INSERT ... ON DUPLICATE KEY UPDATE 替代 REPLACE INTO
+        // REPLACE 对每条已存在记录执行 DELETE+INSERT，大批量时极慢且易超时
+        // ON DUPLICATE KEY UPDATE 原地更新，性能更优
+        const updateSql = cols.map((c) => `${mysqlEscapeId(c)}=VALUES(${mysqlEscapeId(c)})`).join(', ');
+        return `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ? ON DUPLICATE KEY UPDATE ${updateSql}`;
+      }
+      return `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES ?`;
     }
 
     function flushBatch(releaseConn, conn) {
       if (!buffer.length) return Promise.resolve();
       const rows = buffer;
       buffer = [];
-      const values = rows.map((r) => columns.map((c) => (r[c] === '' || r[c] == null ? null : r[c])));
+      const values = rows.map((r) => columns.map((c) => {
+        const raw = (r[c] === '' || r[c] == null ? null : r[c]);
+        // 对日期类型列做格式转换（CSV 常见 DD/MM/YYYY 等非标准格式）
+        if (raw != null && dateCols.has(c)) return normalizeDate(raw);
+        return raw;
+      }));
       const sql = insertSql;
+      debugLog('flushBatch start, rows: ' + rows.length + ', values dims: ' + values.length + 'x' + (values[0] ? values[0].length : 0));
       activeTask = (releaseConn && conn && conn.query)
-        ? conn.query(sql, [values]).then(([res]) => { inserted += res.affectedRows; })
-        : pool.query(sql, [values]).then(([res]) => { inserted += res.affectedRows; });
+        ? conn.query(sql, [values])
+          .then(([res]) => { inserted += res.affectedRows; debugLog('flushBatch done, affected: ' + res.affectedRows + ', total inserted: ' + inserted); })
+          .catch((e) => { debugLog('flushBatch CATCH(conn): ' + e.message + ' | code: ' + e.code + ' | sqlMessage: ' + e.sqlMessage); throw e; })
+        : pool.query(sql, [values])
+          .then(([res]) => { inserted += res.affectedRows; debugLog('flushBatch done, affected: ' + res.affectedRows + ', total inserted: ' + inserted); })
+          .catch((e) => { debugLog('flushBatch CATCH(pool): ' + e.message + ' | code: ' + e.code + ' | sqlMessage: ' + e.sqlMessage); throw e; });
       return activeTask;
     }
 
@@ -309,6 +408,7 @@ function importCsvFileStream(connId, database, table, filePath, { replace = fals
     let poolCleanup = null;
 
     parser.on('error', (err) => {
+      debugLog('parser error: ' + err.message);
       aborted = true;
       reject(err);
     });
@@ -316,6 +416,7 @@ function importCsvFileStream(connId, database, table, filePath, { replace = fals
     parser.on('headers', (headers) => {
       columns = headers.map((h) => String(h).replace(/^\ufeff/, '')); // 兼容 BOM
       insertSql = buildInsertSql(columns);
+      debugLog('headers: ' + columns.join(','));
     });
 
     parser.on('data', async (row) => {
@@ -325,9 +426,11 @@ function importCsvFileStream(connId, database, table, filePath, { replace = fals
       if (buffer.length >= batchSize) {
         // 暂停流，等上一批写完
         parser.pause();
+        debugLog('data paused at count: ' + count + ', buffer: ' + buffer.length);
         try {
           await flushBatch();
         } catch (e) {
+          debugLog('flushBatch FAILED in data: ' + e.message);
           aborted = true;
           if (sharedConn) try { sharedConn.release(); } catch (e) {}
           reject(e);
@@ -339,23 +442,28 @@ function importCsvFileStream(connId, database, table, filePath, { replace = fals
 
     parser.on('end', async () => {
       parserEnded = true;
+      debugLog('parser end, count: ' + count + ', buffer remaining: ' + buffer.length);
       if (aborted) return;
       try {
         // flush 剩余
         if (buffer.length) await flushBatch();
+        debugLog('import resolve, inserted: ' + inserted + ', count: ' + count);
         resolve({ inserted, count, columns: columns || [] });
       } catch (e) {
+        debugLog('flushBatch FAILED in end: ' + e.message);
         aborted = true;
         reject(e);
       }
     });
 
     readStream.on('error', (err) => {
+      debugLog('readStream error: ' + err.message);
       aborted = true;
       reject(err);
     });
 
     readStream.pipe(parser);
+    debugLog('readStream.pipe(parser) done');
   });
 }
 
@@ -366,25 +474,93 @@ function mysqlEscapeId(id) {
 }
 
 function splitSql(sql) {
-  // 简单按分号切分，忽略字符串内的分号
   const result = [];
   let buf = '';
+  let delimiter = ';';
   let inSingle = false;
   let inDouble = false;
   let inBack = false;
-  for (let i = 0; i < sql.length; i++) {
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  const pushStatement = () => {
+    if (buf.trim()) result.push(buf.trim());
+    buf = '';
+  };
+
+  for (let i = 0; i < sql.length;) {
     const ch = sql[i];
-    if (ch === "'" && !inDouble && !inBack) { inSingle = !inSingle; buf += ch; continue; }
-    if (ch === '"' && !inSingle && !inBack) { inDouble = !inDouble; buf += ch; continue; }
-    if (ch === '`' && !inSingle && !inDouble) { inBack = !inBack; buf += ch; continue; }
-    if (ch === ';' && !inSingle && !inDouble && !inBack) {
-      result.push(buf);
-      buf = '';
+    const next = sql[i + 1];
+    if (inLineComment) {
+      buf += ch;
+      i++;
+      if (ch === '\n' || ch === '\r') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      buf += ch;
+      i++;
+      if (ch === '*' && next === '/') {
+        buf += next;
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBack) {
+      if ((ch === '-' && next === '-') || ch === '#') {
+        inLineComment = true;
+        buf += ch;
+        i++;
+        if (ch === '-') { buf += next; i++; }
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        inBlockComment = true;
+        buf += ch + next;
+        i += 2;
+        continue;
+      }
+      const atLineStart = i === 0 || sql[i - 1] === '\n';
+      if (atLineStart) {
+        const lineEnd = sql.indexOf('\n', i);
+        const line = sql.slice(i, lineEnd < 0 ? sql.length : lineEnd);
+        const delimiterMatch = line.match(/^\s*DELIMITER\s+(\S+)\s*$/i);
+        if (delimiterMatch) {
+          delimiter = delimiterMatch[1];
+          i += line.length;
+          if (sql[i] === '\n') i++;
+          continue;
+        }
+      }
+    }
+    if ((inSingle || inDouble) && ch === '\\') {
+      buf += ch;
+      if (next !== undefined) { buf += next; i += 2; } else i++;
+      continue;
+    }
+    if (inSingle && ch === "'" && next === "'") {
+      buf += "''";
+      i += 2;
+      continue;
+    }
+    if (inDouble && ch === '"' && next === '"') {
+      buf += '""';
+      i += 2;
+      continue;
+    }
+    if (ch === "'" && !inDouble && !inBack) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBack) inDouble = !inDouble;
+    else if (ch === '`' && !inSingle && !inDouble) inBack = !inBack;
+    if (!inSingle && !inDouble && !inBack && sql.startsWith(delimiter, i)) {
+      pushStatement();
+      i += delimiter.length;
       continue;
     }
     buf += ch;
+    i++;
   }
-  if (buf.trim()) result.push(buf);
+  pushStatement();
   return result;
 }
 
@@ -470,6 +646,35 @@ async function saveTable(connId, database, table, changes) {
 // 提交值规范化：空串转 null
 function normalizeVal(v) {
   if (v === '' || v == null) return null;
+  return v;
+}
+
+/**
+ * 转换 CSV 中的非标准日期格式到 MySQL 标准格式（YYYY-MM-DD HH:mm:ss）
+ * 支持：
+ *   DD/MM/YYYY            -> YYYY-MM-DD
+ *   DD/MM/YYYY HH:mm:ss  -> YYYY-MM-DD HH:mm:ss
+ *   DD-MM-YYYY HH:mm:ss  -> YYYY-MM-DD HH:mm:ss（欧洲格式）
+ *   其它格式（含已是 YYYY-MM-DD 的）原样返回
+ */
+function normalizeDate(v) {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string') return v;
+  // DD/MM/YYYY 或 DD/MM/YYYY HH:mm:ss（分隔符 / 或 -）
+  const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2}):(\d{1,2}))?$/);
+  if (m) {
+    const dd = m[1].padStart(2, '0');
+    const mm = m[2].padStart(2, '0');
+    const yyyy = m[3];
+    const date = `${yyyy}-${mm}-${dd}`;
+    if (m[4]) {
+      const hh = m[4].padStart(2, '0');
+      const mi = m[5].padStart(2, '0');
+      const ss = m[6].padStart(2, '0');
+      return `${date} ${hh}:${mi}:${ss}`;
+    }
+    return date;
+  }
   return v;
 }
 
@@ -673,6 +878,7 @@ module.exports = {
   exportTableCsv,
   exportTableCsvStream,
   exportQueryCsv,
+  exportQuerySql,
   importTableCsv,
   importCsvFileStream,
   saveTable,
@@ -798,7 +1004,7 @@ function exportTableSqlStream(connId, database, table, opts = {}) {
         } else {
           const colNames = cols.map((c) => '`' + String(c.Field).replace(/`/g, '') + '`');
           const columns = cols.map((c) => ({ name: c.Field }));
-          const insertHead = `INSERT INTO ${quotedDb}.${quotedTbl} (${colNames.join(', ')}) VALUES\n`;
+          const insertHead = `INSERT INTO ${quotedTbl} (${colNames.join(', ')}) VALUES\n`;
 
           // 开一条独立 mysql2 回调连接用于流式查询
           await new Promise((resolve, reject) => {

@@ -41,8 +41,8 @@
     </el-form>
     <template #footer>
       <div class="conn-dialog-footer">
-        <el-button @click="$emit('update:visible', false)">取消</el-button>
-        <el-button type="primary" :disabled="!canExport" @click="runExport">
+        <el-button :disabled="loading" @click="$emit('update:visible', false)">取消</el-button>
+        <el-button type="primary" :loading="loading" :disabled="!canExport" @click="runExport">
           <el-icon><Download /></el-icon>
           <span style="margin-left:4px">开始导出</span>
         </el-button>
@@ -71,6 +71,7 @@ const emit = defineEmits(['update:visible', 'done']);
 const withSchema = ref(true);
 const withData = ref(true);
 const exportLimit = ref(0);
+const loading = ref(false);
 
 const indeterminate = computed(() => !withSchema.value && !withData.value);
 const canExport = computed(() => withSchema.value || withData.value);
@@ -98,16 +99,15 @@ function onCheckChange() {
   // 取消 indeterminate 的视觉状态（其实已经由 computed 计算，这里仅保留槽位以便扩展）
 }
 
-// 同 App.vue triggerDownload：隐藏 a 标签 click 下载
-function triggerDownload(url, filename) {
+// 拿到 blob 后用 a 标签 click 下载
+function triggerDownloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   if (filename) a.download = filename;
-  a.rel = 'noopener';
-  a.target = '_self';
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => document.body.removeChild(a), 200);
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
 }
 
 async function runExport() {
@@ -118,23 +118,36 @@ async function runExport() {
     withData: withData.value,
     limit: exportLimit.value
   };
+  let url;
+  let filename;
+  if (props.kind === 'database') {
+    if (!props.database) { ElMessage.error('未指定数据库'); return; }
+    url = api.exportSqlDatabaseUrl(props.conn.id, props.database, opts);
+    filename = `${props.database}.sql`;
+  } else {
+    if (!props.database || !props.table) { ElMessage.error('未指定表'); return; }
+    url = api.exportSqlTableUrl(props.conn.id, props.database, props.table, opts);
+    filename = `${props.database}_${props.table}.sql`;
+  }
+  loading.value = true;
+  const infoMsg = ElMessage.info({ message: '正在导出，请稍候...', duration: 0 });
   try {
-    let url;
-    let filename;
-    if (props.kind === 'database') {
-      if (!props.database) { ElMessage.error('未指定数据库'); return; }
-      url = api.exportSqlDatabaseUrl(props.conn.id, props.database, opts);
-      filename = `${props.database}.sql`;
-    } else {
-      if (!props.database || !props.table) { ElMessage.error('未指定表'); return; }
-      url = api.exportSqlTableUrl(props.conn.id, props.database, props.table, opts);
-      filename = `${props.database}_${props.table}.sql`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      let msg = `导出失败 (HTTP ${resp.status})`;
+      try { const t = await resp.text(); if (t) msg = '导出失败：' + t; } catch (e2) {}
+      throw new Error(msg);
     }
-    triggerDownload(url, filename);
+    const blob = await resp.blob();
+    triggerDownloadBlob(blob, filename);
+    ElMessage.success('导出完成');
     emit('done', { kind: props.kind, database: props.database, table: props.table, opts });
     emit('update:visible', false);
   } catch (e) {
     ElMessage.error('导出失败：' + (e.message || e));
+  } finally {
+    loading.value = false;
+    if (infoMsg && infoMsg.close) infoMsg.close();
   }
 }
 </script>

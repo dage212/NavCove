@@ -8,8 +8,8 @@
   "scripts": {
     "dev:web": "cd web && npm run dev",
     "dev:server": "cd server && npm run dev",
-    "dev:electron": "cross-env NODE_ENV=development electron .",
-    "dev": "concurrently -k -n web,server,electron -c cyan,magenta,green \"npm run dev:web\" \"npm run dev:server\" \"wait-on tcp:5173 && npm run dev:electron\"",
+    "dev:electron": "concurrently -k -n web,electron -c cyan,green \"npm run dev:web\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
+    "dev": "concurrently -k -n server,electron -c magenta,green \"npm run dev:server\" \"npm run dev:electron\"",
     "build:web": "cd web && npm run build",
     "postinstall": "electron-builder install-app-deps",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
