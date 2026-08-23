@@ -8,6 +8,7 @@
       @toggle-sidebar="toggleSidebar"
       @open-conn="openConnDialog"
       @logout="handleUserCommand('logout')"
+      @view-log="openLogTab"
     />
   <!-- 登录页 -->
   <div v-if="!loggedIn" class="login-page">
@@ -52,30 +53,32 @@
   <!-- 主界面 -->
   <div v-else class="app-layout" @contextmenu.prevent @click="closeContextMenu">
     <!-- 顶级连接选项卡条 -->
-    <div v-if="connTabs.length" class="conn-tabs-bar">
+    <div class="conn-tabs-bar">
       <div class="conn-tabs-scroll">
         <div
           v-for="c in connTabs"
           :key="c.id"
           class="conn-tab"
-          :class="{ active: c.id === activeConnId }"
+          :class="{ active: !showLogTab && c.id === activeConnId }"
           @click="switchConnTab(c.id)"
         >
           <el-icon class="conn-tab-icon"><Coin /></el-icon>
           <span class="conn-tab-name">{{ c.name }}</span>
           <el-icon class="conn-tab-close" @click.stop="closeConnTab(c.id)"><Close /></el-icon>
         </div>
+        <!-- 操作日志页签（可关闭隐藏） -->
+        <div v-if="logTabVisible" class="conn-tab log-tab" :class="{ active: showLogTab }" @click="openLogTab">
+          <el-icon class="conn-tab-icon"><Document /></el-icon>
+          <span class="conn-tab-name">操作日志</span>
+          <el-icon class="conn-tab-close" @click.stop="closeLogTab"><Close /></el-icon>
+        </div>
       </div>
       <el-button class="conn-tab-add" text @click="openConnDialog" title="新建连接">
         <el-icon><Plus /></el-icon>
       </el-button>
     </div>
-    <div v-else class="conn-tabs-empty">
-      <span class="empty-hint">尚未连接任何数据库</span>
-      <el-button type="primary" size="small" @click="openConnDialog">新建连接</el-button>
-    </div>
 
-    <div class="app-body">
+    <div class="app-body" v-show="!showLogTab">
       <!-- 左侧库表树 -->
       <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, dragging: sidebarResizing }" :style="{ width: sidebarCollapsed ? '0' : sidebarWidth + 'px' }">
         <div class="sidebar-head">
@@ -209,6 +212,8 @@
         </div>
       </main>
     </div>
+
+    <OperationLog v-if="showLogTab" class="app-body log-view" />
 
     <connection-dialog v-model:visible="connDialogVisible" :init-conn="connected ? connection : null" @connected="onConnected" />
     <import-dialog v-model:visible="importDialog.visible" :conn="connection" :database="importDialog.database" :table="importDialog.table" :tables="importDialog.tables" @done="onImportDone" />
@@ -345,6 +350,7 @@ import CreateDatabaseDialog from './components/CreateDatabaseDialog.vue';
 import ExportSqlDialog from './components/ExportSqlDialog.vue';
 import StructureView from './components/StructureView.vue';
 import TitleBar from './components/TitleBar.vue';
+import OperationLog from './components/OperationLog.vue';
 
 // ============ 登录 ============
 const loggedIn = ref(false);
@@ -382,6 +388,12 @@ function handleUserCommand(cmd) {
   if (cmd === 'logout') handleLogout();
 }
 
+// 操作日志页签：logTabVisible 控制页签是否存在，showLogTab 控制是否当前显示日志视图
+const showLogTab = ref(false);
+const logTabVisible = ref(false);
+function openLogTab() { logTabVisible.value = true; showLogTab.value = true; }
+function closeLogTab() { logTabVisible.value = false; showLogTab.value = false; }
+
 async function handleLogout() {
   try {
     await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning', confirmButtonText: '退出', cancelButtonText: '取消' });
@@ -391,6 +403,8 @@ async function handleLogout() {
   Object.assign(user, { username: '', name: '' });
   connTabs.value = [];
   activeConnId.value = '';
+  showLogTab.value = false;
+  logTabVisible.value = false;
   ElMessage.success('已退出登录');
 }
 
@@ -690,6 +704,7 @@ function saveCurrentSql() {
 
 // 切换连接选项卡
 function switchConnTab(id) {
+  showLogTab.value = false;
   if (id === activeConnId.value) return;
   saveCurrentSql();
   activeConnId.value = id;

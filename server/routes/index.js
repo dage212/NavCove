@@ -22,6 +22,34 @@ function resolveSession(ctx) {
 
 const sessions = new Map(); // token -> user info
 
+// --- 操作日志辅助：从 ctx 解析用户 + 连接名，写入 operation_log ---
+const stmtConnName = db.prepare('SELECT name FROM connections WHERE id = ?');
+function logOp(ctx, { connId, database, sqlText, sqlType, affected = 0, status = 'success', error = '' }) {
+  try {
+    const u = resolveSession(ctx);
+    let connName = null;
+    if (connId) { const c = stmtConnName.get(connId); connName = c ? c.name : null; }
+    db.logOperation({
+      userId: u?.id, username: u?.username,
+      connId, connName, database,
+      sqlText, sqlType, affected, status, error
+    });
+  } catch (e) { console.error('[logOp] failed:', e.message); }
+}
+// 包裹数据库操作：成功/失败都记日志，自动累加 inserted/updated/deleted/affected
+// 优先使用 mysqlService 返回的完整 SQL（带实际参数值）作为日志 sqlText
+async function withLog(ctx, opt, fn) {
+  try {
+    const res = await fn();
+    const aff = ['inserted', 'updated', 'deleted', 'affected'].reduce((s, k) => s + (Number(res?.[k]) || 0), 0);
+    logOp(ctx, { ...opt, sqlText: res?.sql || opt.sqlText, affected: aff, status: 'success' });
+    return res;
+  } catch (e) {
+    logOp(ctx, { ...opt, status: 'error', error: e.message || String(e) });
+    throw e;
+  }
+}
+
 // --- 用户登录/登出（SQLite users 表 + 内存 Session）---
 router.post('/auth/login', async (ctx) => {
   const { username, password } = ctx.request.body || {};
@@ -173,84 +201,96 @@ router.get('/table/data', async (ctx) => {
 // 批量保存表数据变更（事务）
 router.post('/table/save', async (ctx) => {
   const { connId, database, table, changes } = ctx.request.body || {};
-  const res = await svc.saveTable(connId, database, table, changes || {});
+  const res = await withLog(ctx, { connId, database, sqlText: `SAVE \`${database}\`.\`${table}\``, sqlType: 'INSERT' },
+    () => svc.saveTable(connId, database, table, changes || {}));
   ctx.body = ok(res, `保存完成：新增 ${res.inserted}，修改 ${res.updated}，删除 ${res.deleted}`);
 });
 
 // 单条 UPDATE
 router.put('/table/row', async (ctx) => {
   const { connId, database, table, pk, values } = ctx.request.body || {};
-  const res = await svc.updateRow(connId, database, table, pk, values);
+  const res = await withLog(ctx, { connId, database, sqlText: `UPDATE \`${database}\`.\`${table}\` SET ...`, sqlType: 'UPDATE' },
+    () => svc.updateRow(connId, database, table, pk, values));
   ctx.body = ok(res, res.updated ? '更新成功' : '无变化');
 });
 
 // 单条 INSERT
 router.post('/table/row', async (ctx) => {
   const { connId, database, table, values } = ctx.request.body || {};
-  const res = await svc.insertRow(connId, database, table, values);
+  const res = await withLog(ctx, { connId, database, sqlText: `INSERT INTO \`${database}\`.\`${table}\` (...)`, sqlType: 'INSERT' },
+    () => svc.insertRow(connId, database, table, values));
   ctx.body = ok(res, `插入成功 ${res.inserted} 行`);
 });
 
 // 单条 DELETE
 router.delete('/table/row', async (ctx) => {
   const { connId, database, table, pk } = ctx.request.body || {};
-  const res = await svc.deleteRow(connId, database, table, pk);
+  const res = await withLog(ctx, { connId, database, sqlText: `DELETE FROM \`${database}\`.\`${table}\` WHERE ...`, sqlType: 'DELETE' },
+    () => svc.deleteRow(connId, database, table, pk));
   ctx.body = ok(res, `删除成功 ${res.deleted} 行`);
 });
 
 // 新建表
 router.post('/table/create', async (ctx) => {
   const { connId, database, table, columns } = ctx.request.body || {};
-  const res = await svc.createTable(connId, database, table, columns);
+  const res = await withLog(ctx, { connId, database, sqlText: `CREATE TABLE \`${database}\`.\`${table}\``, sqlType: 'CREATE' },
+    () => svc.createTable(connId, database, table, columns));
   ctx.body = ok(res, `表 ${table} 创建成功`);
 });
 
 // 删除表
 router.delete('/table', async (ctx) => {
   const { connId, database, table } = ctx.request.body || {};
-  const res = await svc.dropTable(connId, database, table);
+  const res = await withLog(ctx, { connId, database, sqlText: `DROP TABLE \`${database}\`.\`${table}\``, sqlType: 'DROP' },
+    () => svc.dropTable(connId, database, table));
   ctx.body = ok(res, `表 ${table} 已删除`);
 });
 
 // 清空表
 router.post('/table/truncate', async (ctx) => {
   const { connId, database, table } = ctx.request.body || {};
-  const res = await svc.truncateTable(connId, database, table);
+  const res = await withLog(ctx, { connId, database, sqlText: `TRUNCATE TABLE \`${database}\`.\`${table}\``, sqlType: 'TRUNCATE' },
+    () => svc.truncateTable(connId, database, table));
   ctx.body = ok(res, `表 ${table} 已清空`);
 });
 
 // 复制表
 router.post('/table/copy', async (ctx) => {
   const { connId, database, srcTable, destTable } = ctx.request.body || {};
-  const res = await svc.copyTable(connId, database, srcTable, destTable);
+  const res = await withLog(ctx, { connId, database, sqlText: `COPY TABLE \`${database}\`.\`${srcTable}\` -> \`${destTable}\``, sqlType: 'CREATE' },
+    () => svc.copyTable(connId, database, srcTable, destTable));
   ctx.body = ok(res, `已复制为 ${destTable}`);
 });
 
 // 重命名表
 router.post('/table/rename', async (ctx) => {
   const { connId, database, oldName, newName } = ctx.request.body || {};
-  const res = await svc.renameTable(connId, database, oldName, newName);
+  const res = await withLog(ctx, { connId, database, sqlText: `RENAME TABLE \`${database}\`.\`${oldName}\` -> \`${newName}\``, sqlType: 'ALTER' },
+    () => svc.renameTable(connId, database, oldName, newName));
   ctx.body = ok(res, `已重命名为 ${newName}`);
 });
 
 // 新建数据库
 router.post('/database/create', async (ctx) => {
   const { connId, name, charset } = ctx.request.body || {};
-  const res = await svc.createDatabase(connId, name, charset);
+  const res = await withLog(ctx, { connId, database: name, sqlText: `CREATE DATABASE \`${name}\``, sqlType: 'CREATE' },
+    () => svc.createDatabase(connId, name, charset));
   ctx.body = ok(res, `数据库 ${name} 创建成功`);
 });
 
 // 删除数据库
 router.delete('/database', async (ctx) => {
   const { connId, name } = ctx.request.body || {};
-  const res = await svc.dropDatabase(connId, name);
+  const res = await withLog(ctx, { connId, database: name, sqlText: `DROP DATABASE \`${name}\``, sqlType: 'DROP' },
+    () => svc.dropDatabase(connId, name));
   ctx.body = ok(res, `数据库 ${name} 已删除`);
 });
 
 // 编辑数据库（修改字符集）
 router.post('/database/alter', async (ctx) => {
   const { connId, name, charset } = ctx.request.body || {};
-  const res = await svc.alterDatabase(connId, name, charset);
+  const res = await withLog(ctx, { connId, database: name, sqlText: `ALTER DATABASE \`${name}\` CHARACTER SET ${charset || '?'}`, sqlType: 'ALTER' },
+    () => svc.alterDatabase(connId, name, charset));
   ctx.body = ok(res, `数据库 ${name} 字符集已更新`);
 });
 
@@ -279,8 +319,16 @@ router.post('/query', async (ctx) => {
     ctx.body = ok([]);
     return;
   }
-  const results = await svc.executeSql(connId, database, sql);
-  ctx.body = ok(results);
+  try {
+    const results = await svc.executeSql(connId, database, sql);
+    const affected = results.reduce((s, r) => s + (r.type !== 'select' && r.type !== 'error' ? (r.affected || 0) : 0), 0);
+    const errRes = results.find(r => r.type === 'error');
+    logOp(ctx, { connId, database, sqlText: sql, affected, status: errRes ? 'partial' : 'success', error: errRes ? (errRes.message || '') : '' });
+    ctx.body = ok(results);
+  } catch (e) {
+    logOp(ctx, { connId, database, sqlText: sql, status: 'error', error: e.message || String(e) });
+    throw e;
+  }
 });
 
 // --- 导入导出 ---
@@ -348,7 +396,8 @@ router.get('/export/sql/database', async (ctx) => {
 // 导入 CSV（文本内容上传，仍保留兼容）
 router.post('/import/table', async (ctx) => {
   const { connId, database, table, content, replace } = ctx.request.body || {};
-  const res = await svc.importTableCsv(connId, database, table, content, { replace });
+  const res = await withLog(ctx, { connId, database, sqlText: `IMPORT CSV INTO \`${database}\`.\`${table}\` (${replace ? 'REPLACE' : 'INSERT'})`, sqlType: 'INSERT' },
+    () => svc.importTableCsv(connId, database, table, content, { replace }));
   ctx.body = ok(res, `导入完成，影响 ${res.inserted} 行`);
 });
 
@@ -398,6 +447,9 @@ router.post('/import/upload/merge', async (ctx) => {
     : null;
   try {
     const merged = await uploadSvc.mergeUpload({ uploadId, importFn });
+    if (needImport) {
+      logOp(ctx, { connId, database, sqlText: `IMPORT CSV (upload) INTO \`${database}\`.\`${table}\` (${replace ? 'REPLACE' : 'INSERT'})`, sqlType: 'INSERT', affected: (merged.imported && merged.imported.inserted) || 0, status: 'success' });
+    }
     const msg = needImport
       ? `合并成功，导入完成，影响 ${(merged.imported && merged.imported.inserted) || 0} 行`
       : '合并成功';
@@ -407,6 +459,9 @@ router.post('/import/upload/merge', async (ctx) => {
       imported: merged.imported || null
     }, msg);
   } catch (e) {
+    if (needImport) {
+      logOp(ctx, { connId, database, sqlText: `IMPORT CSV (upload) INTO \`${database}\`.\`${table}\` (${replace ? 'REPLACE' : 'INSERT'})`, sqlType: 'INSERT', status: 'error', error: e.sqlMessage || e.message || String(e) });
+    }
     // 导入失败也清理已合并文件和切片，避免缓存文件长期占用磁盘。
     uploadSvc.cleanup(uploadId);
     // 把数据库具体错误原因返回给前端
@@ -431,6 +486,33 @@ router.post('/import/upload/merge', async (ctx) => {
 router.delete('/import/upload/:uploadId', (ctx) => {
   uploadSvc.cleanup(ctx.params.uploadId);
   ctx.body = ok(null, '已清理');
+});
+
+// --- 操作日志查询 ---
+router.get('/logs', (ctx) => {
+  const { startDate, endDate, username, sqlType, page = 1, size = 50, keyword } = ctx.query;
+  const p = Math.max(1, Number(page) || 1);
+  const s = Math.min(500, Math.max(1, Number(size) || 50));
+  const where = [];
+  const params = [];
+  if (startDate) { where.push("created_at >= ?"); params.push(startDate + ' 00:00:00'); }
+  if (endDate) { where.push("created_at <= ?"); params.push(endDate + ' 23:59:59'); }
+  if (username) { where.push("username = ?"); params.push(username); }
+  if (sqlType && sqlType !== 'NON_SELECT') { where.push("sql_type = ?"); params.push(sqlType); }
+  if (sqlType === 'NON_SELECT') { where.push("sql_type != 'SELECT'"); }
+  if (keyword) { where.push("(sql_text LIKE ? OR database LIKE ? OR conn_name LIKE ?)"); const kw = '%' + keyword + '%'; params.push(kw, kw, kw); }
+  const whereSql = where.length ? (' WHERE ' + where.join(' AND ')) : '';
+  const total = db.prepare('SELECT COUNT(*) AS total FROM operation_log' + whereSql).get(...params).total;
+  const rows = db.prepare('SELECT id, created_at, username, conn_name, database, sql_type, sql_text, affected, status, error FROM operation_log' + whereSql + ' ORDER BY id DESC LIMIT ? OFFSET ?').all(...params, s, (p - 1) * s);
+  // 统计各类型计数（用于前端过滤标签）
+  const stats = db.prepare("SELECT sql_type, COUNT(*) AS cnt FROM operation_log" + whereSql + " GROUP BY sql_type").all(...params);
+  ctx.body = ok({ total, page: p, size: s, rows, stats });
+});
+
+// 日志用户列表（用于人员过滤下拉）
+router.get('/logs/users', (ctx) => {
+  const rows = db.prepare("SELECT DISTINCT username FROM operation_log WHERE username IS NOT NULL ORDER BY username").all();
+  ctx.body = ok(rows.map(r => r.username));
 });
 
 module.exports = router;

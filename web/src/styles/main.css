@@ -145,6 +145,10 @@ body {
 }
 
 .app-body { flex: 1; display: flex; overflow: hidden; }
+/* 操作日志视图：覆盖 app-body 的 row 布局为单列 */
+.app-body.log-view { display: flex; flex-direction: column; }
+/* 固定日志页签 */
+.conn-tab.log-tab .conn-tab-name { font-weight: 600; }
 
 /* ================ 可拖动分隔条 ================ */
 .resizer { flex-shrink: 0; position: relative; z-index: 6; background: transparent; transition: background .15s ease; }

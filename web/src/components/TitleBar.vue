@@ -27,6 +27,10 @@
                 <el-icon><UserFilled /></el-icon>
                 <span style="margin-left:6px">{{ user.name }} ({{ user.username }})</span>
               </el-dropdown-item>
+              <el-dropdown-item divided command="view-log">
+                <el-icon><Document /></el-icon>
+                <span style="margin-left:6px">查看日志</span>
+              </el-dropdown-item>
               <el-dropdown-item divided command="logout">
                 <el-icon><SwitchButton /></el-icon>
                 <span style="margin-left:6px">退出登录</span>
@@ -60,7 +64,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Expand, Fold, ArrowDown, UserFilled, SwitchButton } from '@element-plus/icons-vue';
+import { Expand, Fold, ArrowDown, UserFilled, SwitchButton, Document } from '@element-plus/icons-vue';
 
 defineProps({
   loggedIn: { type: Boolean, default: false },
@@ -69,7 +73,7 @@ defineProps({
   userInitial: { type: String, default: '' }
 });
 
-const emit = defineEmits(['toggle-sidebar', 'open-conn', 'logout']);
+const emit = defineEmits(['toggle-sidebar', 'open-conn', 'logout', 'view-log']);
 
 // 平台判断：macOS 用原生交通灯按钮，不渲染自定义窗口控制
 const isMac = computed(() => {
@@ -97,6 +101,7 @@ onUnmounted(() => {
 function onToggleSidebar() { emit('toggle-sidebar'); }
 function onUserCommand(cmd) {
   if (cmd === 'logout') emit('logout');
+  else if (cmd === 'view-log') emit('view-log');
 }
 function onMinimize() { window.navcove?.window?.minimize?.(); }
 function onMaximize() { window.navcove?.window?.maximize?.(); }

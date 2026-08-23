@@ -597,6 +597,7 @@ async function saveTable(connId, database, table, changes) {
     conn = await pool.getConnection();
     await conn.beginTransaction();
     let inserted = 0, updated = 0, deleted = 0;
+    const sqls = [];
 
     for (const ins of inserts) {
       const cols = Object.keys(ins.values || {});
@@ -608,6 +609,7 @@ async function saveTable(connId, database, table, changes) {
         cols.map((c) => normalizeVal(ins.values[c]))
       );
       inserted += r.affectedRows;
+      sqls.push(`INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES (${cols.map((c) => sqlStringLiteral(normalizeVal(ins.values[c]))).join(', ')})`);
     }
     for (const upd of updates) {
       const setCols = Object.keys(upd.values || {});
@@ -622,6 +624,7 @@ async function saveTable(connId, database, table, changes) {
         params
       );
       updated += r.affectedRows;
+      sqls.push(`UPDATE ${quotedDb}.${quotedTable} SET ${setCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(normalizeVal(upd.values[c]))}`).join(', ')} WHERE ${pkCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(upd.pk[c])}`).join(' AND ')}`);
     }
     for (const del of deletes) {
       const pkCols = Object.keys(del.pk || {});
@@ -632,9 +635,10 @@ async function saveTable(connId, database, table, changes) {
         pkCols.map((c) => normalizeVal(del.pk[c]))
       );
       deleted += r.affectedRows;
+      sqls.push(`DELETE FROM ${quotedDb}.${quotedTable} WHERE ${pkCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(del.pk[c])}`).join(' AND ')}`);
     }
     await conn.commit();
-    return { inserted, updated, deleted };
+    return { inserted, updated, deleted, sql: sqls.join('; ') };
   } catch (e) {
     if (conn) await conn.rollback().catch(() => {});
     throw e;
@@ -686,13 +690,17 @@ async function updateRow(connId, database, table, pk, values) {
   const pkKeys = Object.keys(pk || {});
   const valueKeys = Object.keys(values || {});
   if (!pkKeys.length) throw new Error('主键不能为空，无法定位更新的行');
-  if (!valueKeys.length) return { updated: 0 };
+  if (!valueKeys.length) return { updated: 0, sql: '' };
   const setSql = valueKeys.map((c) => `${mysqlEscapeId(c)} = ?`).join(', ');
   const whereSql = pkKeys.map((c) => `${mysqlEscapeId(c)} = ?`).join(' AND ');
   const sql = `UPDATE ${quotedDb}.${quotedTable} SET ${setSql} WHERE ${whereSql} LIMIT 1`;
   const params = [...valueKeys.map((c) => normalizeVal(values[c])), ...pkKeys.map((c) => pk[c])];
   const [res] = await pool.query(sql, params);
-  return { updated: res.affectedRows || 0 };
+  // 拼接带实际值的完整 SQL（用于审计日志）
+  const setFull = valueKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(normalizeVal(values[c]))}`).join(', ');
+  const whereFull = pkKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(pk[c])}`).join(' AND ');
+  const fullSql = `UPDATE ${quotedDb}.${quotedTable} SET ${setFull} WHERE ${whereFull} LIMIT 1`;
+  return { updated: res.affectedRows || 0, sql: fullSql };
 }
 
 // 单条 INSERT（values 是字段名→值）
@@ -707,7 +715,10 @@ async function insertRow(connId, database, table, values) {
   const params = keys.map((c) => normalizeVal(values[c]));
   const sql = `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES (${placeholders})`;
   const [res] = await pool.query(sql, params);
-  return { inserted: res.affectedRows || 0, insertId: res.insertId };
+  // 拼接带实际值的完整 SQL（用于审计日志）
+  const valSql = keys.map((c) => sqlStringLiteral(normalizeVal(values[c]))).join(', ');
+  const fullSql = `INSERT INTO ${quotedDb}.${quotedTable} (${colSql}) VALUES (${valSql})`;
+  return { inserted: res.affectedRows || 0, insertId: res.insertId, sql: fullSql };
 }
 
 // 单条 DELETE（按主键条件）
@@ -721,7 +732,10 @@ async function deleteRow(connId, database, table, pk) {
   const sql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${whereSql} LIMIT 1`;
   const params = pkKeys.map((c) => pk[c]);
   const [res] = await pool.query(sql, params);
-  return { deleted: res.affectedRows || 0 };
+  // 拼接带实际值的完整 SQL（用于审计日志）
+  const whereFull = pkKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(pk[c])}`).join(' AND ');
+  const fullSql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${whereFull} LIMIT 1`;
+  return { deleted: res.affectedRows || 0, sql: fullSql };
 }
 
 // 新建表（columns: [{ name, type, nullable, pk, autoIncrement, comment }]）

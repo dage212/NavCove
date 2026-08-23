@@ -121,7 +121,10 @@ export const api = {
   // 切片上传使用 FormData（multipart/form-data）：Content-Type 交给浏览器自动生成（带 boundary）
   importChunk: (formData) => http.post('/import/upload/chunk', formData),
   importMerge: (payload) => http.post('/import/upload/merge', payload, { timeout: 300000 }),
-  importCancel: (uploadId) => http.delete(`/import/upload/${uploadId}`)
+  importCancel: (uploadId) => http.delete(`/import/upload/${uploadId}`),
+  // 操作日志
+  getLogs: (params) => http.get('/logs', { params }),
+  getLogUsers: () => http.get('/logs/users')
 };
 
 export default api;
