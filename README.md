@@ -44,14 +44,15 @@ NavCove/
 
 ### 1. 安装依赖
 
+项目使用 **pnpm workspace** 管理，在根目录执行单条命令即可同时安装 `web` 和 `server` 的依赖：
+
 ```bash
-# 根目录（Electron 相关）
-npm install
-# 后端
-cd server && npm install
-# 前端
-cd ../web && npm install
+# 在根目录执行（自动安装 web + server + 根目录 Electron 依赖）
+pnpm install
 ```
+
+> 包管理器：pnpm v10+
+> 工作区配置见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)，国内镜像源见 [.npmrc](./.npmrc)。
 
 ### 2. 开发模式（一键启动后端 + 前端 + Electron）
 
