@@ -369,14 +369,6 @@ async function handleLogin() {
     user.name = data.name;
     loggedIn.value = true;
     ElMessage.success(`欢迎，${data.name || data.username}`);
-    // 登录后自动连接（initEditor 由 watch(editorRef) 兜底触发）
-    try {
-      const def = await api.getDefaultConnection();
-      if (def) {
-        const res = await api.connect(def);
-        onConnected({ id: res.id, name: res.name, ...def });
-      }
-    } catch (e) {}
   } catch (e) {
     ElMessage.error(e.message || '登录失败');
   } finally {
@@ -416,15 +408,6 @@ onMounted(async () => {
     user.name = data.name;
     loggedIn.value = true;
     await nextTick();
-    // initEditor 由下方 watch(editorRef) 兜底触发，确保 textarea 真正渲染后再初始化
-    // 自动用默认连接
-    try {
-      const def = await api.getDefaultConnection();
-      if (def) {
-        const res = await api.connect(def);
-        onConnected({ id: res.id, name: res.name, ...def });
-      }
-    } catch (e) {}
   } catch (e) {
     // 未登录，显示登录页
     localStorage.removeItem('sqladmin_token');

@@ -1,19 +1,45 @@
 const poolMgr = require('../db/pool');
 
+function formatConnError(e, conn) {
+  const host = conn.host || '127.0.0.1';
+  const port = conn.port || 3306;
+  if (e.code === 'ECONNREFUSED') {
+    return `无法连接 ${host}:${port}，请确认 MySQL 已启动并监听该端口`;
+  }
+  if (e.code === 'ETIMEDOUT' || e.code === 'PROTOCOL_CONNECTION_LOST') {
+    return `连接 ${host}:${port} 超时，请检查主机、端口和防火墙`;
+  }
+  if (e.code === 'ENOTFOUND') {
+    return `找不到主机 ${host}`;
+  }
+  if (e.code === 'ER_ACCESS_DENIED_ERROR') {
+    return '用户名或密码错误';
+  }
+  return e.sqlMessage || e.message || '连接失败';
+}
+
 // 测试连接（一次性连接，不入池）
 async function testConnection(conn) {
   const mysql = require('mysql2/promise');
-  const connection = await mysql.createConnection({
-    host: conn.host,
-    port: conn.port || 3306,
-    user: conn.user,
-    password: conn.password == null ? '' : conn.password,
-    database: conn.database || undefined,
-    connectTimeout: 5000
-  });
-  const [rows] = await connection.query('SELECT VERSION() AS version');
-  await connection.end();
-  return { version: rows[0] && rows[0].version };
+  let connection;
+  try {
+    connection = await mysql.createConnection({
+      host: conn.host,
+      port: conn.port || 3306,
+      user: conn.user,
+      password: conn.password == null ? '' : conn.password,
+      database: conn.database || undefined,
+      connectTimeout: 5000
+    });
+    const [rows] = await connection.query('SELECT VERSION() AS version');
+    return { version: rows[0] && rows[0].version };
+  } catch (e) {
+    const err = new Error(formatConnError(e, conn));
+    err.status = 400;
+    throw err;
+  } finally {
+    if (connection) await connection.end().catch(() => {});
+  }
 }
 
 // 获取所有数据库

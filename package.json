@@ -19,6 +19,22 @@
     "dist:mac": "npm run build:web && electron-builder --mac dmg zip",
     "dist:linux": "npm run build:web && electron-builder --linux AppImage deb"
   },
+  "dependencies": {
+    "@koa/cors": "^5.0.0",
+    "@koa/multer": "^4.0.0",
+    "@koa/router": "^13.1.0",
+    "better-sqlite3": "^11.10.0",
+    "fast-csv": "^5.0.2",
+    "koa": "^2.15.3",
+    "koa-bodyparser": "^4.4.1",
+    "koa-compose": "^4.1.0",
+    "koa-convert": "^2.0.0",
+    "koa-json": "^2.0.2",
+    "koa-static": "^5.0.0",
+    "multer": "^2.2.0",
+    "mysql2": "^3.11.0",
+    "uuid": "^10.0.0"
+  },
   "devDependencies": {
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
@@ -37,11 +53,15 @@
       "electron/**/*",
       "server/**/*",
       "web/dist/**/*",
-      "package.json"
+      "package.json",
+      "!electron/afterPack.js",
+      "node_modules/koa-compose/**/*",
+      "node_modules/koa-convert/**/*",
+      "node_modules/better-sqlite3/build/Release/*.node",
+      "!**/node_modules/better-sqlite3/prebuilds/**"
     ],
-    "asarUnpack": [
-      "**/node_modules/better-sqlite3/**/*"
-    ],
+    "asar": false,
+    "afterPack": "electron/afterPack.js",
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
@@ -55,7 +75,10 @@
     "mac": {
       "target": "dmg",
       "icon": "build/icon.png",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "gatekeeperAssess": false,
+      "hardenedRuntime": false
     },
     "dmg": {
       "title": "${productName} ${version}",

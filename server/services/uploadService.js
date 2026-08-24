@@ -17,7 +17,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+const { dataDir } = require('../paths');
+const UPLOAD_DIR = path.join(dataDir, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // 临时文件日志（调试 merge 崩溃问题）

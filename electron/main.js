@@ -1,62 +1,101 @@
-const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { fork } = require('child_process');
 const http = require('http');
 
-// 彻底禁用原生菜单
-Menu.setApplicationMenu(null);
+function bootLog(msg) {
+  try {
+    fs.appendFileSync(path.join(os.tmpdir(), 'navcove-boot.log'), `${new Date().toISOString()} ${msg}\n`);
+  } catch (e) {}
+}
 
-// 在 app ready 之前把 userData 重定向到项目内目录，避免沙箱限制系统 AppData 写入
-app.setPath('userData', path.join(__dirname, '..', 'app-data'));
-app.setPath('logs', path.join(__dirname, '..', 'app-data', 'logs'));
+bootLog(`main start packaged=${app.isPackaged} exec=${process.execPath}`);
+
+// 开发态写到项目内；打包后必须用系统 userData（安装包目录只读）
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(__dirname, '..', 'app-data'));
+  app.setPath('logs', path.join(__dirname, '..', 'app-data', 'logs'));
+}
 
 let mainWindow = null;
 let serverProcess = null;
 let serverPort = 0;
 
-// ============ 内嵌后端服务 ============
+function getDataDir() {
+  const dir = path.join(app.getPath('userData'), 'data');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function startServer() {
   return new Promise((resolve, reject) => {
     const serverEntry = path.join(__dirname, '..', 'server', 'app.js');
-    const isDev = process.env.NODE_ENV === 'development';
-    // 让 server 动态分配端口（PORT=0），通过 stdout 读取实际端口
+    const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
+    let settled = false;
+    let stderrBuf = '';
+
+    const done = (err, port) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve(port);
+    };
+
+    const env = {
+      ...process.env,
+      PORT: '0',
+      NODE_ENV: isDev ? 'development' : 'production',
+      NAVCOVE_DATA_DIR: getDataDir()
+    };
+    // 子进程跑 Node 脚本；若继承了 ELECTRON_RUN_AS_NODE 以外的 Electron 调试变量，清掉以免干扰
+    delete env.ELECTRON_NO_ASAR;
+
     serverProcess = fork(serverEntry, [], {
-      env: { ...process.env, PORT: '0', NODE_ENV: isDev ? 'development' : 'production' },
+      env,
       stdio: ['pipe', 'pipe', 'pipe', 'ipc']
     });
 
-    const onData = (raw) => {
-      const text = raw.toString();
-      process.stdout.write(`[server] ${text}`);
-      // 解析后端打印的端口（格式形如 "[NavCove] 服务已启动: http://localhost:xxxxx"）
-      const m = text.match(/http:\/\/localhost:(\d+)/);
+    const onPort = (text) => {
+      const m = String(text).match(/http:\/\/localhost:(\d+)/);
       if (m && !serverPort) {
         serverPort = parseInt(m[1], 10);
-        resolve(serverPort);
+        done(null, serverPort);
       }
     };
-    serverProcess.stdout.on('data', onData);
+
+    serverProcess.on('message', (msg) => {
+      if (msg && msg.type === 'server-ready' && msg.port && !serverPort) {
+        serverPort = Number(msg.port);
+        done(null, serverPort);
+      }
+    });
+    serverProcess.stdout.on('data', (raw) => {
+      const text = raw.toString();
+      process.stdout.write(`[server] ${text}`);
+      onPort(text);
+    });
     serverProcess.stderr.on('data', (raw) => {
       const text = raw.toString();
+      stderrBuf += text;
       process.stderr.write(`[server:err] ${text}`);
-      const m = text.match(/http:\/\/localhost:(\d+)/);
-      if (m && !serverPort) {
-        serverPort = parseInt(m[1], 10);
-        resolve(serverPort);
-      }
+      onPort(text);
     });
     serverProcess.on('exit', (code) => {
       console.log('[electron] server process exited, code=', code);
+      if (!serverPort) {
+        const hint = stderrBuf.trim().split('\n').slice(-8).join('\n');
+        done(new Error(`后端进程退出 (code=${code})${hint ? '\n' + hint : ''}`));
+      }
     });
-    serverProcess.on('error', reject);
-    // 兜底：10s 后仍未拿到端口，则用固定端口探测
+    serverProcess.on('error', (err) => done(err));
     setTimeout(() => {
-      if (!serverPort) reject(new Error('后端启动超时'));
-    }, 10000);
+      if (!serverPort) done(new Error('后端启动超时'));
+    }, 15000);
   });
 }
 
-// 等待后端 http 可访问
 function waitForHttp(port, retries = 30) {
   return new Promise((resolve, reject) => {
     let count = 0;
@@ -81,7 +120,6 @@ function waitForHttp(port, retries = 30) {
   });
 }
 
-// ============ 窗口 ============
 async function createWindow() {
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
@@ -92,7 +130,6 @@ async function createWindow() {
     title: 'NavCove',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     backgroundColor: '#F0F5FF',
-    // macOS 用原生交通灯按钮（hiddenInset）；Windows/Linux 无框自定义按钮
     frame: isMac ? true : false,
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     autoHideMenuBar: true,
@@ -104,7 +141,6 @@ async function createWindow() {
     }
   });
 
-  // 窗口控制 IPC
   ipcMain.on('win-minimize', () => mainWindow && mainWindow.minimize());
   ipcMain.on('win-maximize', () => {
     if (!mainWindow) return;
@@ -116,19 +152,16 @@ async function createWindow() {
   mainWindow.on('maximize', () => mainWindow.webContents.send('win-maximize-changed', true));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('win-maximize-changed', false));
 
-  // 外链在新窗口打开
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  const isDev = process.env.NODE_ENV === 'development';
+  const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
   if (isDev) {
-    // 开发模式：直接加载 Vite dev server
     await mainWindow.loadURL('http://localhost:5173/');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // 生产模式：加载后端静态托管的 dist
     await waitForHttp(serverPort);
     await mainWindow.loadURL(`http://localhost:${serverPort}/`);
   }
@@ -138,18 +171,27 @@ async function createWindow() {
   });
 }
 
-// ============ 生命周期 ============
+function killServer(signal) {
+  if (!serverProcess) return;
+  try { serverProcess.kill(signal); } catch (e) {}
+  serverProcess = null;
+}
+
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   try {
-    const isDev = process.env.NODE_ENV === 'development';
-    // 开发模式：后端由 concurrently 单独启动（npm run dev:server），这里不再 fork
-    // 生产模式：内嵌 fork 后端
+    const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
+    bootLog(`ready isDev=${isDev}`);
     if (!isDev) {
       await startServer();
+      bootLog(`server port=${serverPort}`);
     }
     await createWindow();
+    bootLog('window created');
   } catch (e) {
+    bootLog(`start failed: ${e && e.stack ? e.stack : e}`);
     console.error('[electron] 启动失败:', e.message);
+    dialog.showErrorBox('NavCove 启动失败', e.message || String(e));
     app.quit();
   }
 
@@ -159,22 +201,14 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverProcess) {
-    try { serverProcess.kill('SIGTERM'); } catch (e) {}
-    serverProcess = null;
-  }
+  killServer('SIGTERM');
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
-  if (serverProcess) {
-    try { serverProcess.kill('SIGTERM'); } catch (e) {}
-    serverProcess = null;
-  }
+  killServer('SIGTERM');
 });
 
 process.on('exit', () => {
-  if (serverProcess) {
-    try { serverProcess.kill('SIGKILL'); } catch (e) {}
-  }
+  killServer('SIGKILL');
 });

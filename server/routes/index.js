@@ -50,6 +50,10 @@ async function withLog(ctx, opt, fn) {
   }
 }
 
+router.get('/health', (ctx) => {
+  ctx.body = ok({ ok: true });
+});
+
 // --- 用户登录/登出（SQLite users 表 + 内存 Session）---
 router.post('/auth/login', async (ctx) => {
   const { username, password } = ctx.request.body || {};
