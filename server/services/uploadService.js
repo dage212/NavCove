@@ -68,6 +68,17 @@ function initUpload({ fileName, fileSize, chunkSize, fileHash }) {
     const err = new Error('缺少必要参数：fileName/fileSize/chunkSize');
     err.status = 400; throw err;
   }
+  // 顺带清理超过 7 天的上传记录（成功导入后保留的 meta 长期不删会积累）
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(UPLOAD_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      const p = path.join(UPLOAD_DIR, f);
+      try {
+        if (now - fs.statSync(p).mtimeMs > 7 * 86400e3) cleanup(f.replace(/\.json$/, ''));
+      } catch (e) {}
+    }
+  } catch (e) {}
   const totalChunks = Math.max(1, Math.ceil(fileSize / chunkSize));
   // key：优先 fileHash；没有则用 名字+大小 的 md5
   const key = fileHash || crypto.createHash('md5').update(`${fileName}|${fileSize}|${chunkSize}`).digest('hex');
@@ -143,15 +154,17 @@ async function mergeUpload({ uploadId, importFn }) {
     debugLog('[mergeUpload] merging chunks, totalChunks: ' + meta.totalChunks);
     const mergedDir = UPLOAD_DIR;
     const mergedFile = path.join(mergedDir, `${uploadId}_${meta.fileName}`);
-    // 同步合并切片（避免 createWriteStream 文件句柄未释放导致后续读取卡住）
-    const chunks = [];
-    for (let i = 0; i < meta.totalChunks; i++) {
-      const cPath = chunkFile(uploadId, i);
-      const buf = fs.readFileSync(cPath);
-      chunks.push(buf);
-      debugLog('[mergeUpload] chunk ' + i + ' size: ' + buf.length);
-    }
-    fs.writeFileSync(mergedFile, Buffer.concat(chunks));
+    // 流式合并：逐块写入（每块 4MB，内存峰值≈一块），避免整文件 Buffer.concat 进内存
+    await new Promise((resolve, reject) => {
+      const ws = fs.createWriteStream(mergedFile);
+      ws.on('error', reject);
+      // 等 close（句柄已释放）再返回，避免后续读取卡住
+      ws.on('close', resolve);
+      for (let i = 0; i < meta.totalChunks; i++) {
+        ws.write(fs.readFileSync(chunkFile(uploadId, i)));
+      }
+      ws.end();
+    });
     meta.mergedFilePath = mergedFile;
     meta.merged = true;
     writeMeta(meta);
@@ -164,21 +177,31 @@ async function mergeUpload({ uploadId, importFn }) {
     try {
       result.imported = await importFn(meta.mergedFilePath);
       debugLog('[mergeUpload] importFn done, inserted: ' + (result.imported && result.imported.inserted));
+      // 成功：保留 meta（imported=true，供前端“已导入跳过”），删除切片和合并文件释放磁盘
       meta.imported = true;
       writeMeta(meta);
+      removeChunks(meta);
+      try { fs.rmSync(meta.mergedFilePath, { force: true }); } catch (e) {}
     } catch (e) {
       debugLog('[mergeUpload] importFn FAILED: ' + e.message + ' | code: ' + e.code + ' | sqlMessage: ' + e.sqlMessage);
+      // 失败：保留 meta + 合并文件（断点续传只保护到上传阶段，导入失败后用户可重试合并/导入，无需重传）
+      // 切片已合并，删掉只保留合并文件，减少磁盘占用
+      meta.imported = false;
+      writeMeta(meta);
+      removeChunks(meta);
       throw e;
-    } finally {
-      // 不管导入成功与否，最后都清理缓存文件（切片、meta、合并文件）
-      cleanup(uploadId);
-      debugLog('[mergeUpload] cleanup done');
     }
   } else {
-    try { fs.rmSync(chunkDir(uploadId), { recursive: true, force: true }); } catch (e) {}
+    removeChunks(meta);
   }
   debugLog('[mergeUpload] return result');
   return result;
+}
+
+// 删除切片目录（保留 meta）
+function removeChunks(meta) {
+  if (!meta) return;
+  try { fs.rmSync(chunkDir(meta.uploadId), { recursive: true, force: true }); } catch (e) {}
 }
 
 /**

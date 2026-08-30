@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>NavCove</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, Helvetica, Arial, sans-serif;
+    background: #F0F5FF;
+    color: #111827;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  .splash { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #4DA2FF 0%, #007AFF 100%);
+    box-shadow: 0 10px 28px rgba(0, 122, 255, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 38px;
+  }
+  .title { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  .sub { font-size: 13px; color: #64748B; margin-top: 4px; letter-spacing: .5px; }
+  .spinner {
+    width: 28px;
+    height: 28px;
+    margin-top: 6px;
+    border: 3px solid #CFE6FF;
+    border-top-color: #007AFF;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="splash">
+    <div class="logo">🧭</div>
+    <div>
+      <div class="title">NavCove</div>
+      <div class="sub">数据库管理平台 · 正在启动…</div>
+    </div>
+    <div class="spinner"></div>
+  </div>
+</body>
+</html>

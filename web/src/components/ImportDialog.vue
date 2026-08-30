@@ -330,18 +330,23 @@ async function doMerge() {
       database: props.database,
       table: targetTable.value,
       replace: mode.value === 'replace',
-      batchSize: 200
+      batchSize: 500
     });
     merging.value = false;
     const imported = merged.imported || { inserted: 0, count: 0, columns: [] };
-    ElMessage.success(`导入完成，共 ${imported.count} 行，影响 ${imported.inserted} 行`);
+    const skipped = (imported.badRows && imported.badRows.length) || 0;
+    ElMessage.success(
+      skipped
+        ? `导入完成，共 ${imported.count} 行，影响 ${imported.inserted} 行，剔除错误行 ${skipped} 行`
+        : `导入完成，共 ${imported.count} 行，影响 ${imported.inserted} 行`
+    );
     emit('done', { imported, database: props.database, table: targetTable.value });
     emit('update:visible', false);
     resetFile(true);
   } catch (e) {
     merging.value = false;
     lastError.value = e.message || String(e);
-    ElMessage.error(lastError.value);
+    ElMessage.error('导入失败：' + lastError.value + '（已上传的数据已保留，可直接点「开始导入」重试；若上次已有部分数据写入目标表，请先清空表或改用 REPLACE 模式）');
   }
 }
 </script>

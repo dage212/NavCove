@@ -7,7 +7,39 @@
     <title>NavCove · 数据库管理工具</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <style>
+        #navcove-boot {
+          position: fixed; inset: 0; z-index: 99999;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+          background: #F0F5FF; color: #111827;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, Arial, sans-serif;
+          -webkit-font-smoothing: antialiased; user-select: none;
+        }
+        #navcove-boot .logo {
+          width: 72px; height: 72px; border-radius: 20px;
+          background: linear-gradient(135deg, #4DA2FF 0%, #007AFF 100%);
+          box-shadow: 0 10px 28px rgba(0, 122, 255, 0.35);
+          display: flex; align-items: center; justify-content: center; font-size: 38px;
+        }
+        #navcove-boot .title { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+        #navcove-boot .sub { font-size: 13px; color: #64748B; margin-top: 4px; letter-spacing: .5px; }
+        #navcove-boot .spinner {
+          width: 28px; height: 28px; margin-top: 4px;
+          border: 3px solid #CFE6FF; border-top-color: #007AFF; border-radius: 50%;
+          animation: navcove-spin 0.9s linear infinite;
+        }
+        @keyframes navcove-spin { to { transform: rotate(360deg); } }
+      </style>
+      <div id="navcove-boot">
+        <div class="logo">🧭</div>
+        <div>
+          <div class="title">NavCove</div>
+          <div class="sub">数据库管理平台 · 正在加载…</div>
+        </div>
+        <div class="spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

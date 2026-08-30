@@ -5,17 +5,24 @@
   "main": "electron/main.js",
   "author": "NavCove",
   "license": "MIT",
+  "workspaces": [
+    "web",
+    "server"
+  ],
   "scripts": {
     "dev:web": "cd web && npm run dev",
     "dev:server": "cd server && npm run dev",
     "dev:electron": "concurrently -k -n web,electron -c cyan,green \"npm run dev:web\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
+    "predev": "npm rebuild better-sqlite3",
     "dev": "concurrently -k -n server,electron -c magenta,green \"npm run dev:server\" \"npm run dev:electron\"",
     "build:web": "cd web && npm run build",
     "postinstall": "electron-builder install-app-deps",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "prepack": "electron-builder install-app-deps",
     "pack": "npm run build:web && electron-builder --dir",
+    "predist": "electron-builder install-app-deps",
     "dist": "npm run build:web && electron-builder",
-    "dist:win": "npm run build:web && electron-builder --win nsis portable",
+    "dist:win": "npm run build:web && electron-builder --win nsis",
     "dist:mac": "npm run build:web && electron-builder --mac dmg zip",
     "dist:linux": "npm run build:web && electron-builder --linux AppImage deb"
   },
@@ -103,6 +110,5 @@
     "extraMetadata": {
       "main": "electron/main.js"
     }
-  },
-  "packageManager": "pnpm@10.12.4+sha512.5ea8b0deed94ed68691c9bad4c955492705c5eeb8a87ef86bc62c74a26b037b08ff9570f108b2e4dbd1dd1a9186fea925e527f141c648e85af45631074680184"
+  }
 }

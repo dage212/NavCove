@@ -20,7 +20,10 @@ http.interceptors.response.use(
   },
   (err) => {
     const msg = (err.response && err.response.data && err.response.data.message) || err.message || '网络错误';
-    return Promise.reject(new Error(msg));
+    const e = new Error(msg);
+    // 保留原始错误码（如 ECONNABORTED=超时），供调用方区分超时/业务错误
+    if (err.code) e.code = err.code;
+    return Promise.reject(e);
   }
 );
 
@@ -68,7 +71,8 @@ export const api = {
   truncateTable: (connId, database, table) =>
     http.post('/table/truncate', { connId, database, table }),
   copyTable: (connId, database, srcTable, destTable) =>
-    http.post('/table/copy', { connId, database, srcTable, destTable }),
+    // 大表复制可能超过全局 60s 超时，单独放宽到 10 分钟
+    http.post('/table/copy', { connId, database, srcTable, destTable }, { timeout: 600000 }),
   renameTable: (connId, database, oldName, newName) =>
     http.post('/table/rename', { connId, database, oldName, newName }),
   // 数据库操作（DDL）
@@ -86,7 +90,7 @@ export const api = {
   getTableStructure: (connId, database, table) =>
     http.get('/table/structure', { params: { connId, database, table } }),
   // 查询
-  query: (connId, database, sql) => http.post('/query', { connId, database, sql }),
+  query: (connId, database, sql, config) => http.post('/query', { connId, database, sql }, config),
   // 导入导出
   exportTableUrl: (connId, database, table, limit) =>
     `/api/export/table?connId=${encodeURIComponent(connId)}&database=${encodeURIComponent(database)}&table=${encodeURIComponent(table)}${limit ? `&limit=${limit}` : ''}`,
@@ -115,6 +119,9 @@ export const api = {
   },
   importTable: (connId, database, table, content, replace) =>
     http.post('/import/table', { connId, database, table, content, replace }),
+  // SQL 文件导入（限制 + 分批事务 + 坏语句剔除；大文件放宽到 10 分钟）
+  importSql: (connId, database, content) =>
+    http.post('/import/sql', { connId, database, content }, { timeout: 600000 }),
 
   // 切片上传导入（断点续传）
   importInit: (payload) => http.post('/import/upload/init', payload),

@@ -4,7 +4,21 @@ const { v4: uuidv4 } = require('uuid');
 const poolMgr = require('../db/pool');
 const svc = require('../services/mysqlService');
 const config = require('../config');
-const db = require('../db/sqlite');
+
+// SQLite 原生模块（better-sqlite3）体积大、加载慢。用 Proxy 延迟到首次访问数据库时才
+// require，让健康检查/静态资源/登录态判断（session 在内存）不依赖它，缩短后端就绪时间。
+let _db = null;
+function ensureDb() {
+  if (!_db) _db = require('../db/sqlite');
+  return _db;
+}
+const db = new Proxy({}, {
+  get(_t, prop) {
+    const real = ensureDb();
+    const v = real[prop];
+    return typeof v === 'function' ? v.bind(real) : v;
+  }
+});
 
 // 统一成功响应
 function ok(data, msg = 'success') {
@@ -23,13 +37,17 @@ function resolveSession(ctx) {
 const sessions = new Map(); // token -> user info
 
 // --- 操作日志辅助：从 ctx 解析用户 + 连接名，写入 operation_log ---
-const stmtConnName = db.prepare('SELECT name FROM connections WHERE id = ?');
+let _stmtConnName = null;
+function getConnNameStmt() {
+  if (!_stmtConnName) _stmtConnName = ensureDb().prepare('SELECT name FROM connections WHERE id = ?');
+  return _stmtConnName;
+}
 function logOp(ctx, { connId, database, sqlText, sqlType, affected = 0, status = 'success', error = '' }) {
   try {
     const u = resolveSession(ctx);
     let connName = null;
-    if (connId) { const c = stmtConnName.get(connId); connName = c ? c.name : null; }
-    db.logOperation({
+    if (connId) { const c = getConnNameStmt().get(connId); connName = c ? c.name : null; }
+    ensureDb().logOperation({
       userId: u?.id, username: u?.username,
       connId, connName, database,
       sqlText, sqlType, affected, status, error
@@ -405,17 +423,48 @@ router.post('/import/table', async (ctx) => {
   ctx.body = ok(res, `导入完成，影响 ${res.inserted} 行`);
 });
 
+// 导入 SQL 文件（文本内容上传，与 CSV 导入同样的限制 + 分批事务 + 坏语句剔除）
+router.post('/import/sql', async (ctx) => {
+  const { connId, database, content } = ctx.request.body || {};
+  if (!content || !String(content).trim()) {
+    ctx.status = 400; ctx.body = { code: 400, message: 'SQL 内容不能为空' }; return;
+  }
+  try {
+    const res = await withLog(ctx, { connId, database, sqlText: `IMPORT SQL INTO \`${database || ''}\``, sqlType: 'INSERT' },
+      () => svc.importSqlText(connId, database, content));
+    ctx.body = ok(res, `SQL 导入完成：共 ${res.total} 条语句，成功 ${res.executed} 条${res.badRows && res.badRows.length ? `，剔除错误 ${res.badRows.length} 条` : ''}`);
+  } catch (e) {
+    // SQL 导入的“全批失败”同样返回 badStatements 供前端提示
+    const body = { code: e.status || 500, message: e.message || 'SQL 导入失败' };
+    if (e.badStatements && e.badStatements.length) { body.badStatements = e.badStatements; }
+    if (e.badRows && e.badRows.length) { body.badRows = e.badRows; }
+    ctx.status = e.status || 500;
+    ctx.body = body;
+  }
+});
+
 // ---- 切片上传 + 断点续传 + 流式导入 ----
-const multer = require('@koa/multer');
-const uploadSvc = require('../services/uploadService');
-// @koa/multer 内存存储：切片存在内存 buffer，然后由我们写入磁盘
-const storage = multer.memoryStorage();
-const multerMem = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 单切片最大 200MB
+// multer 依赖链较长、上传服务平时用不到，都改为懒加载，避免拖慢后端启动
+let _multerMem = null;
+function getMulterMem() {
+  if (!_multerMem) {
+    const multer = require('@koa/multer');
+    // @koa/multer 内存存储：切片存在内存 buffer，然后由我们写入磁盘
+    const storage = multer.memoryStorage();
+    _multerMem = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 单切片最大 200MB
+  }
+  return _multerMem;
+}
+let _uploadSvc = null;
+function getUploadSvc() {
+  if (!_uploadSvc) _uploadSvc = require('../services/uploadService');
+  return _uploadSvc;
+}
 
 // 1) 初始化（断点续传入口）
 router.post('/import/upload/init', async (ctx) => {
   const { fileName, fileSize, chunkSize, fileHash } = ctx.request.body || {};
-  const res = uploadSvc.initUpload({
+  const res = getUploadSvc().initUpload({
     fileName: String(fileName || ''),
     fileSize: Number(fileSize),
     chunkSize: Number(chunkSize),
@@ -425,12 +474,14 @@ router.post('/import/upload/init', async (ctx) => {
 });
 
 // 2) 上传一个切片（multipart/form-data：file 是切片本体，uploadId + index + totalChunks 在 fields）
-router.post('/import/upload/chunk', multerMem.single('file'), async (ctx) => {
+router.post('/import/upload/chunk', async (ctx, next) => {
+  return getMulterMem().single('file')(ctx, next);
+}, async (ctx) => {
   const { uploadId, index } = ctx.request.body || {};
   if (!ctx.file || !ctx.file.buffer) {
     ctx.status = 400; ctx.body = { code: 400, message: '缺少切片文件字段 file' }; return;
   }
-  const res = uploadSvc.saveChunk({
+  const res = getUploadSvc().saveChunk({
     uploadId: String(uploadId || ''),
     index: Number(index),
     buffer: ctx.file.buffer
@@ -446,9 +497,12 @@ router.post('/import/upload/merge', async (ctx) => {
   const importFn = needImport
     ? async (mergedFile) => await svc.importCsvFileStream(connId, database, table, mergedFile, {
       replace: !!replace,
-      batchSize: batchSize ? Number(batchSize) : undefined
+      batchSize: batchSize ? Number(batchSize) : undefined,
+      // 替换导入：单批失败回滚后剔除坏行继续；普通导入遇错直接抛出
+      skipErrorRows: !!replace
     })
     : null;
+  const uploadSvc = getUploadSvc();
   try {
     const merged = await uploadSvc.mergeUpload({ uploadId, importFn });
     if (needImport) {
@@ -466,8 +520,8 @@ router.post('/import/upload/merge', async (ctx) => {
     if (needImport) {
       logOp(ctx, { connId, database, sqlText: `IMPORT CSV (upload) INTO \`${database}\`.\`${table}\` (${replace ? 'REPLACE' : 'INSERT'})`, sqlType: 'INSERT', status: 'error', error: e.sqlMessage || e.message || String(e) });
     }
-    // 导入失败也清理已合并文件和切片，避免缓存文件长期占用磁盘。
-    uploadSvc.cleanup(uploadId);
+    // 注意：这里不再 cleanup——mergeUpload 内部已处理（成功删缓存、失败保留 meta+合并文件供重试）。
+    // 用户在界面上“继续导入”可复用已上传的数据，无需整文件重传。
     // 把数据库具体错误原因返回给前端
     // mysql2 错误对象包含 code(如 ER_DUP_ENTRY)、errno、sqlState、sqlMessage
     ctx.status = e.status || 500;
@@ -475,20 +529,21 @@ router.post('/import/upload/merge', async (ctx) => {
     const dbMsg = e.sqlMessage || e.message || '未知错误';
     ctx.body = {
       code: ctx.status,
-      message: `导入失败：${dbCode}${dbMsg}`,
+      message: `导入失败：${dbCode}${dbMsg}${e.badRows && e.badRows.length ? `（已剔除 ${e.badRows.length} 行错误数据）` : ''}`,
       dbError: e.code ? {
         code: e.code,
         errno: e.errno,
         sqlState: e.sqlState,
         sqlMessage: e.sqlMessage
-      } : undefined
+      } : undefined,
+      badRows: e.badRows && e.badRows.length ? e.badRows : undefined
     };
   }
 });
 
 // 4) 取消 + 清理
 router.delete('/import/upload/:uploadId', (ctx) => {
-  uploadSvc.cleanup(ctx.params.uploadId);
+  getUploadSvc().cleanup(ctx.params.uploadId);
   ctx.body = ok(null, '已清理');
 });
 

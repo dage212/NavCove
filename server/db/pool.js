@@ -1,10 +1,9 @@
-const mysql = require('mysql2/promise');
-
-// 连接池管理：按连接 ID 缓存池，复用连接
 const pools = new Map();
 const connMeta = new Map(); // id -> 连接配置元信息
 
 function buildPool(conn) {
+  // 懒加载：mysql2 体积大，只在真正建连接池时加载，避免拖慢后端启动
+  const mysql = require('mysql2/promise');
   return mysql.createPool({
     host: conn.host,
     port: conn.port || 3306,

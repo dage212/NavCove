@@ -61,6 +61,17 @@ const server = app.listen(PORT, () => {
   }
 });
 
+// 后台预加载 SQLite 原生模块（路由里是懒加载，不阻塞健康检查/页面加载）。
+// 模块损坏时尽早退出报错，避免错误延迟到用户操作时才暴露。
+setImmediate(() => {
+  try {
+    require('./db/sqlite');
+  } catch (e) {
+    console.error('[sqlite] 初始化失败:', e && e.stack ? e.stack : e);
+    process.exit(1);
+  }
+});
+
 app.on('error', (err) => {
   console.error('[NavCove][error]', err.message);
 });

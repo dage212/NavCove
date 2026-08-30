@@ -92,17 +92,24 @@ function startServer() {
     serverProcess.on('error', (err) => done(err));
     setTimeout(() => {
       if (!serverPort) done(new Error('后端启动超时'));
-    }, 15000);
+    }, 30000);
   });
 }
 
-function waitForHttp(port, retries = 30) {
+function waitForHttp(port, retries = 50) {
   return new Promise((resolve, reject) => {
     let count = 0;
     const tryReq = () => {
       const req = http.get(`http://localhost:${port}/api/health`, (res) => {
         res.resume();
-        resolve();
+        // 严格 200 才视为就绪：确保路由与静态资源都挂载完成后再加载页面
+        if (res.statusCode === 200) {
+          resolve();
+          return;
+        }
+        count += 1;
+        if (count >= retries) reject(new Error('后端健康检查未就绪'));
+        else setTimeout(tryReq, 200);
       });
       req.on('error', () => {
         count += 1;
@@ -162,13 +169,23 @@ async function createWindow() {
     await mainWindow.loadURL('http://localhost:5173/');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    await waitForHttp(serverPort);
-    await mainWindow.loadURL(`http://localhost:${serverPort}/`);
+    // 先显示本地启动页，后端就绪后再切换到真实页面（避免启动白屏/无窗口等待）
+    await mainWindow.loadFile(path.join(__dirname, 'splash.html'));
   }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// 后端就绪后切换到真实前端页面
+async function showMainApp() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!serverPort) return;
+  await waitForHttp(serverPort);
+  bootLog('health ok');
+  await mainWindow.loadURL(`http://localhost:${serverPort}/`);
+  bootLog('app loaded');
 }
 
 function killServer(signal) {
@@ -179,15 +196,20 @@ function killServer(signal) {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
   try {
-    const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
     bootLog(`ready isDev=${isDev}`);
-    if (!isDev) {
-      await startServer();
-      bootLog(`server port=${serverPort}`);
+    if (isDev) {
+      await createWindow();
+      return;
     }
+    // 后端 fork 与窗口创建并行：fork 在子进程执行，不阻塞主进程建窗，省掉串行等待
+    const serverPromise = startServer();
     await createWindow();
     bootLog('window created');
+    await serverPromise;
+    bootLog(`server port=${serverPort}`);
+    await showMainApp();
   } catch (e) {
     bootLog(`start failed: ${e && e.stack ? e.stack : e}`);
     console.error('[electron] 启动失败:', e.message);
@@ -195,8 +217,11 @@ app.whenReady().then(async () => {
     app.quit();
   }
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app.on('activate', async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await createWindow();
+      if (!isDev) await showMainApp();
+    }
   });
 });
 

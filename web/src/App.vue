@@ -797,8 +797,12 @@ async function runSql() {
   try {
     const results = await api.query(connection.value.id, execDb, sql);
     if (!results.length) { ElMessage.success('执行完成'); return; }
+    const errRes = results.find((r) => r.type === 'error');
+    if (errRes) {
+      ElMessage.error(`第 ${errRes.index} 条语句执行失败（前 ${errRes.executed} 条已执行）: ${errRes.message}`);
+    }
     const tableInfo = parseTableName(sql, execDb);
-    const tabs = results.map((r, i) => {
+    const tabs = results.filter((r) => r.type !== 'error').map((r, i) => {
       if (r.type === 'select') {
         return {
           id: 'tab_' + Date.now() + '_' + i, kind: 'query',
@@ -817,9 +821,10 @@ async function runSql() {
       }
     });
     resultTabs.value = tabs;
-    activeTab.value = tabs[tabs.length - 1].id;
+    if (tabs.length) activeTab.value = tabs[tabs.length - 1].id;
     const sel = results.find((r) => r.type === 'select');
     if (sel) resultMeta.value = `返回 ${sel.rows.length} 行`;
+    else if (errRes) resultMeta.value = `第 ${errRes.index} 条语句执行失败`;
     else resultMeta.value = `影响 ${results[results.length - 1].affected} 行`;
   } catch (e) { ElMessage.error('执行失败: ' + e.message); }
   finally { loading.value = false; }
@@ -1239,6 +1244,22 @@ async function handleDatabaseExport(data) {
 }
 
 // 导入 SQL 文件
+// 解码导入的文本文件：BOM 优先，其次严格 UTF-8，失败退回 GBK（Windows dump / Excel 导出常见）
+function decodeSqlText(buf) {
+  const u8 = new Uint8Array(buf);
+  const hasUtf8Bom = u8.length >= 3 && u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF;
+  const hasUtf16LE = u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE;
+  const hasUtf16BE = u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF;
+  if (hasUtf16LE) return new TextDecoder('utf-16le').decode(u8);
+  if (hasUtf16BE) return new TextDecoder('utf-16be').decode(u8);
+  if (hasUtf8Bom) return new TextDecoder('utf-8').decode(u8); // 默认忽略 BOM
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(u8);
+  } catch (e) {
+    try { return new TextDecoder('gbk').decode(u8); } catch (e2) { return new TextDecoder('utf-8').decode(u8); }
+  }
+}
+
 function handleImportSql(data) {
   const database = data.type === 'database' ? data.name : (data.database || currentDb.value);
   const input = document.createElement('input');
@@ -1248,19 +1269,22 @@ function handleImportSql(data) {
     const file = input.files[0];
     if (!file) return;
     try {
-      const content = await file.text();
-      if (!content.trim()) { ElMessage.warning('SQL 文件为空'); return; }
-      const results = await api.query(connection.value.id, database, content);
-      const hasError = results.some(r => r.type === 'error');
-      if (hasError) {
-        const errMsg = results.find(r => r.type === 'error')?.message || '执行出错';
-        ElMessage.error(`导入失败: ${errMsg}`);
+      const content = decodeSqlText(await file.arrayBuffer()).trim();
+      if (!content) { ElMessage.warning('SQL 文件为空'); return; }
+      // 与 CSV 导入一致的三重限制 + 分批事务 + 坏语句剔除
+      const res = await api.importSql(connection.value.id, database, content);
+      const badCount = (res.badRows && res.badRows.length) || 0;
+      if (badCount) {
+        ElMessage.warning(`SQL 文件「${file.name}」导入完成：共 ${res.total} 条语句，成功 ${res.executed} 条，剔除错误 ${badCount} 条`);
       } else {
-        ElMessage.success(`SQL 文件「${file.name}」导入成功`);
-        refreshTree();
+        ElMessage.success(`SQL 文件「${file.name}」导入成功，共执行 ${res.executed} 条语句`);
       }
+      refreshTree();
     } catch (e) {
-      ElMessage.error('导入失败: ' + (e.message || e));
+      const hint = e.code === 'ECONNABORTED'
+        ? '（请求超时，后端可能仍在执行，请稍后到库里确认实际结果，避免重复导入）'
+        : '';
+      ElMessage.error('导入失败: ' + (e.message || e) + hint);
     }
   };
   input.click();
