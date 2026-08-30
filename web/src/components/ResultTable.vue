@@ -171,7 +171,8 @@ function onExport(cmd) {
     name: props.tab.table,
     type: cmd,
     kind: props.tab.kind,
-    sql: props.tab.sql
+    sql: props.tab.sql,
+    connId: props.connId || props.tab.connId
   });
 }
 

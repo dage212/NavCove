@@ -134,42 +134,55 @@ router.post('/connection/test', async (ctx) => {
 // 建立连接（创建池 + 持久化到 SQLite，返回 id）
 router.post('/connection/connect', async (ctx) => {
   const body = ctx.request.body || {};
+  const name = (body.name || '').trim();
+  if (!name) { ctx.status = 400; ctx.body = { code: 400, message: '连接名称不能为空' }; return; }
   await svc.testConnection(body);
   const id = body.id || uuidv4();
   poolMgr.registerConnection(id, body);
   const sess = resolveSession(ctx);
 
-  const exist = db.prepare('SELECT id FROM connections WHERE id = ?').get(id);
-  if (exist) {
-    db.prepare(
-      `UPDATE connections SET name=?, type=?, host=?, port=?, user=?, password=?,
-       user_id=?, updated_at=datetime('now','localtime') WHERE id=?`
-    ).run(
-      body.name,
-      body.type || 'mysql',
-      body.host,
-      Number(body.port) || 3306,
-      body.user,
-      body.password == null ? '' : body.password,
-      sess ? sess.id : null,
-      id
-    );
+  const save = (recordId) => {
+    const exist = db.prepare('SELECT id FROM connections WHERE id = ?').get(recordId);
+    if (exist) {
+      db.prepare(
+        `UPDATE connections SET name=?, type=?, host=?, port=?, user=?, password=?,
+         user_id=?, updated_at=datetime('now','localtime') WHERE id=?`
+      ).run(
+        name,
+        body.type || 'mysql',
+        body.host,
+        Number(body.port) || 3306,
+        body.user,
+        body.password == null ? '' : body.password,
+        sess ? sess.id : null,
+        recordId
+      );
+    } else {
+      db.prepare(
+        `INSERT INTO connections (id, name, type, host, port, user, password, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        recordId,
+        name,
+        body.type || 'mysql',
+        body.host,
+        Number(body.port) || 3306,
+        body.user,
+        body.password == null ? '' : body.password,
+        sess ? sess.id : null
+      );
+    }
+  };
+
+  // 保证连接名称唯一：同名连接复用已有记录的 id 更新，而不是新增重复记录。
+  // 运行时连接池仍用本次 id（body.id 或 uuid），避免多个页签共用同一后端连接。
+  const same = db.prepare('SELECT id FROM connections WHERE name = ?').get(name);
+  if (same) {
+    save(same.id);
   } else {
-    db.prepare(
-      `INSERT INTO connections (id, name, type, host, port, user, password, user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      body.name,
-      body.type || 'mysql',
-      body.host,
-      Number(body.port) || 3306,
-      body.user,
-      body.password == null ? '' : body.password,
-      sess ? sess.id : null
-    );
+    save(body.id || uuidv4());
   }
-  ctx.body = ok({ id, name: body.name }, '连接成功');
+  ctx.body = ok({ id, name }, '连接成功');
 });
 
 // 断开连接（同时从 SQLite 删除）

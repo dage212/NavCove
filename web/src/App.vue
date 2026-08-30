@@ -102,7 +102,7 @@
           <el-tree
             v-else
             ref="treeRef"
-            :key="activeConnId"
+            :key="treeRenderKey"
             :data="treeData"
             :props="treeProps"
             node-key="key"
@@ -204,8 +204,20 @@
                   <span>{{ tab.label }}</span>
                   <el-icon style="margin-left:4px;vertical-align:middle" @click.stop="closeTab(i)"><Close /></el-icon>
                 </template>
-                <result-table v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'" :tab="tab" :conn-id="connection.id" @export="exportTable" @rows-changed="onRowsChanged" />
-                <structure-view v-else :tab="tab" :conn-id="connection.id" />
+                <result-table
+                  v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'"
+                  :key="`${activeConnId}:${tab.id}`"
+                  :tab="tab"
+                  :conn-id="tab.connId || connection.id"
+                  @export="exportTable"
+                  @rows-changed="onRowsChanged"
+                />
+                <structure-view
+                  v-else
+                  :key="`${activeConnId}:${tab.id}`"
+                  :tab="tab"
+                  :conn-id="tab.connId || connection.id"
+                />
               </el-tab-pane>
             </el-tabs>
           </div>
@@ -395,6 +407,7 @@ async function handleLogout() {
   Object.assign(user, { username: '', name: '' });
   connTabs.value = [];
   activeConnId.value = '';
+  treeRenderKey.value = '';
   showLogTab.value = false;
   logTabVisible.value = false;
   ElMessage.success('已退出登录');
@@ -423,6 +436,7 @@ let editorInited = false;
 // 多连接选项卡：每个连接一份独立状态
 const connTabs = ref([]);
 const activeConnId = ref('');
+const treeRenderKey = ref('');
 const curConn = computed(() => connTabs.value.find((c) => c.id === activeConnId.value) || null);
 
 // writable computed 代理：所有对 connection/currentDb/resultTabs 等的访问自动落到当前激活的 connTab
@@ -604,9 +618,11 @@ function pickDefaultDb(dbs, preferDb) {
 async function onConnected(conn) {
   // 保存当前 tab 的 SQL 内容（如果有）
   saveCurrentSql();
+  // 页签 ID 只用于前端区分页面，不能直接复用后端连接 ID。
+  const tabId = `conn_tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   // 创建新连接选项卡
   const newTab = {
-    id: conn.id,
+    id: tabId,
     name: conn.name || conn.host || `连接${connTabs.value.length + 1}`,
     connection: { ...conn },
     databases: [],
@@ -622,60 +638,38 @@ async function onConnected(conn) {
   };
   connTabs.value.push(newTab);
   activeConnId.value = newTab.id;
+  treeRenderKey.value = `${newTab.id}:${Date.now()}`;
   connDialogVisible.value = false;
 
-  await loadDatabases();
-  await refreshTree();
-
-  // 连接成功后自动展示对应内容：选默认库 -> 展开 -> 显示第一张表数据
-  const dbs = databases.value || [];
-  if (!dbs.length) return;
-  const db = pickDefaultDb(dbs, conn && conn.database);
-  if (!db) return;
-  currentDb.value = db;
-  databaseSelect.value = db;
-  newTab.databaseSelect = db;
-  const dbKey = 'db:' + db;
-  // 注意：不要在拉到表之前就设置 expandedKeys，否则 el-tree 会触发 loadNode 自动加载，
-  // 后面我们再用 store.append 填充就会和 loadNode 的结果重复
-  await nextTick();
-  // 加载该库的表
-  let tables = [];
+  // 初始化必须写入新建页签本身，不能通过当前页签代理写入；用户可能在请求返回前切换页签。
   try {
-    tables = await api.listTables(connection.value.id, db);
-  } catch (e) {}
-  // 编辑器默认为空内容
-  newTab.sql = '';
-  if (cmInstance) cmInstance.setValue('');
-  // 如果有表，自动打开第一张表的数据
-  if (tables.length) {
-    const first = tables[0];
-    currentTable.value = first.name;
-    openResultTab({
-      kind: 'table', connId: connection.value.id, database: db, table: first.name, label: first.name
-    });
-    // 关键：lazy 模式下不要给 data.children 赋值（el-tree 会和 store 内部 childNodes 重复显示）
-    // 通过 store.append 把表节点直接塞进 el-tree 内部 store，并标记 loaded=true 避免后续展开时再调 loadNode
-    const tree = treeRef.value;
-    if (tree) {
-      const dbNode = tree.getNode(dbKey);
-      if (dbNode) {
-        dbNode.loaded = true;
-        tables.forEach((t) => {
-          try {
-            tree.store.append({
-              key: 'tb:' + db + '.' + t.name,
-              label: t.name, type: 'table', name: t.name,
-              database: db, rows: t.rows, isLeaf: true
-            }, dbNode);
-          } catch (e) {}
-        });
-        // 表节点已塞入 store，现在安全展开（loaded=true，不会再触发 loadNode）
-        dbNode.expanded = true;
-        expandedKeys.value = [dbKey];
-      }
-    }
+    const databasesForTab = await api.listDatabases(newTab.connection.id);
+    const targetTab = connTabs.value.find((tab) => tab.id === newTab.id);
+    if (!targetTab) return;
+    targetTab.databases = databasesForTab;
+    targetTab.treeData = databasesForTab.map((d) => ({
+      key: 'db:' + d, label: d, type: 'database', name: d, connId: newTab.id, children: []
+    }));
+  } catch (e) {
+    ElMessage.error('获取数据库列表失败: ' + e.message);
   }
+
+  // 新建连接后只保留数据库列表，不自动查询或打开第一张表。
+  const tabState = connTabs.value.find((tab) => tab.id === newTab.id);
+  if (!tabState || activeConnId.value !== newTab.id) return;
+  const dbs = tabState.databases || [];
+  const db = pickDefaultDb(dbs, conn && conn.database);
+  if (db) {
+    tabState.currentDb = db;
+    tabState.databaseSelect = db;
+    databaseSelect.value = db;
+  }
+  tabState.currentTable = '';
+  tabState.resultTabs = [];
+  tabState.activeTab = '';
+  tabState.resultMeta = '';
+  tabState.sql = '';
+  if (cmInstance) cmInstance.setValue('');
 }
 
 // 保存当前 cmInstance 内容到当前 connTab.sql
@@ -686,16 +680,23 @@ function saveCurrentSql() {
 }
 
 // 切换连接选项卡
-function switchConnTab(id) {
+async function switchConnTab(id) {
   showLogTab.value = false;
   if (id === activeConnId.value) return;
+  const nextTab = connTabs.value.find((tab) => tab.id === id);
+  if (!nextTab) return;
   saveCurrentSql();
   activeConnId.value = id;
-  databaseSelect.value = curConn.value?.databaseSelect || curConn.value?.currentDb || '';
+  treeRenderKey.value = `${id}:${Date.now()}`;
+  databaseSelect.value = nextTab.databaseSelect || nextTab.currentDb || '';
+  // 切换页签后重新拉取数据库列表填充左侧树
+  await refreshTree();
+  // 结果页签和表操作通过 tab.connId 固定绑定连接；切换时只重建当前页签组件。
   nextTick(() => {
-    if (cmInstance && curConn.value) {
-      cmInstance.setValue(curConn.value.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
+    if (cmInstance) {
+      cmInstance.setValue(nextTab.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
     }
+    treeRef.value?.setCurrentKey(null);
   });
 }
 
@@ -707,6 +708,8 @@ function closeConnTab(id) {
   connTabs.value.splice(idx, 1);
   if (activeConnId.value === id) {
     activeConnId.value = connTabs.value[0]?.id || '';
+    treeData.value = curConn.value?.treeData ?? [];
+    treeRenderKey.value = `${activeConnId.value}:${Date.now()}`;
     nextTick(() => {
       if (cmInstance && curConn.value) {
         cmInstance.setValue(curConn.value.sql || '');
@@ -721,29 +724,48 @@ async function loadDatabases() {
 }
 
 async function refreshTree() {
-  const dbs = await api.listDatabases(connection.value.id);
-  databases.value = dbs;
-  treeData.value = dbs.map((d) => ({
-    key: 'db:' + d, label: d, type: 'database', name: d, children: []
+  const requestConnId = activeConnId.value;
+  const requestConn = connTabs.value.find((tab) => tab.id === requestConnId);
+  if (!requestConn) return;
+  const dbs = await api.listDatabases(requestConn.connection.id);
+  // 刷新期间可能已经切换到另一个连接，旧请求不能覆盖当前页签的数据。
+  const targetTab = connTabs.value.find((tab) => tab.id === requestConnId);
+  if (!targetTab) return;
+  targetTab.databases = dbs;
+  targetTab.treeData = dbs.map((d) => ({
+    key: 'db:' + d, label: d, type: 'database', name: d, connId: requestConnId, children: []
   }));
 }
 
 async function loadNode(node, resolve) {
   const data = node.data;
   if (data.type === 'database') {
+    const requestTabId = data.connId || activeConnId.value;
+    const requestConn = connTabs.value.find((tab) => tab.id === requestTabId);
+    if (!requestConn) { resolve([]); return; }
     try {
-      const tables = await api.listTables(connection.value.id, data.name);
+      const tables = await api.listTables(requestConn.connection.id, data.name);
+      // 请求返回时连接可能已经切换，避免旧请求污染当前树。
+      if (activeConnId.value !== requestTabId) { resolve([]); return; }
       resolve(tables.map((t) => ({
         key: 'tb:' + data.name + '.' + t.name,
-        label: t.name, type: 'table', name: t.name, database: data.name, rows: t.rows, isLeaf: true
+        label: t.name, type: 'table', name: t.name, database: data.name,
+        connId: requestTabId, rows: t.rows, isLeaf: true
       })));
-    } catch (e) { ElMessage.error('加载表失败: ' + e.message); resolve([]); }
+    } catch (e) {
+      if (activeConnId.value === requestTabId) ElMessage.error('加载表失败: ' + e.message);
+      resolve([]);
+    }
   } else resolve([]);
 }
 
 function onNodeClick(data) {
+  if (data.connId && data.connId !== activeConnId.value) return;
   if (data.type === 'database') {
+    // 点击库节点时同步切换当前页签选中的库（下拉框 + 状态），保证查询落在当前页签的库上。
     currentDb.value = data.name;
+    databaseSelect.value = data.name;
+    if (curConn.value) curConn.value.databaseSelect = data.name;
     currentTable.value = '';
   } else if (data.type === 'table') {
     currentDb.value = data.database;
@@ -753,13 +775,17 @@ function onNodeClick(data) {
 }
 
 function onDbChange(val) {
-  if (curConn.value) curConn.value.databaseSelect = val || '';
+  if (curConn.value) {
+    curConn.value.databaseSelect = val || '';
+    curConn.value.currentDb = val || '';
+  }
   if (val) ElMessage.success({ message: `已切换到数据库: ${val}`, duration: 1500 });
 }
 
 function viewTableData(data) {
   currentDb.value = data.database;
   databaseSelect.value = data.database;
+  if (curConn.value) curConn.value.databaseSelect = data.database;
   currentTable.value = data.name;
   openResultTab({
     kind: 'table', connId: connection.value.id, database: data.database, table: data.name, label: data.name
@@ -788,14 +814,19 @@ function parseTableName(sql, fallbackDb) {
 
 async function runSql() {
   if (!connected.value) { ElMessage.warning('请先连接数据库'); return; }
+  // 执行前锁定发起查询的页签与连接，返回后结果只写回该页签，避免切换页签后串到新页签。
+  const execTabId = activeConnId.value;
+  const execConnId = connection.value.id;
   const execDb = databaseSelect.value;
   if (!execDb) { ElMessage.warning('请先在 SQL 编辑器下拉框中选择数据库'); return; }
   const sql = cmInstance.getValue();
   if (!sql || !sql.trim()) { ElMessage.warning('SQL 不能为空'); return; }
   loading.value = true;
-  resultMeta.value = '';
+  if (curConn.value) curConn.value.resultMeta = '';
   try {
-    const results = await api.query(connection.value.id, execDb, sql);
+    const results = await api.query(execConnId, execDb, sql);
+    const targetTab = connTabs.value.find((tab) => tab.id === execTabId);
+    if (!targetTab) return;
     if (!results.length) { ElMessage.success('执行完成'); return; }
     const errRes = results.find((r) => r.type === 'error');
     if (errRes) {
@@ -803,36 +834,38 @@ async function runSql() {
     }
     const tableInfo = parseTableName(sql, execDb);
     const tabs = results.filter((r) => r.type !== 'error').map((r, i) => {
+      const base = { id: 'tab_' + Date.now() + '_' + i, connId: execConnId, affected: r.affected };
       if (r.type === 'select') {
         return {
-          id: 'tab_' + Date.now() + '_' + i, kind: 'query',
+          ...base, kind: 'query',
           label: `结果 ${i + 1} (${r.rows.length} 行)`,
-          columns: r.fields, rows: r.rows, affected: r.affected,
+          columns: r.fields, rows: r.rows,
           database: tableInfo?.database, table: tableInfo?.table, sql
         };
       } else {
         return {
-          id: 'tab_' + Date.now() + '_' + i, kind: 'write',
+          ...base, kind: 'write',
           label: `执行 ${i + 1}`,
           columns: ['affectedRows', 'insertId', 'changedRows'],
           rows: [{ affectedRows: r.affected, insertId: r.insertId, changedRows: r.changed }],
-          affected: r.affected, writeInfo: r
+          writeInfo: r
         };
       }
     });
-    resultTabs.value = tabs;
-    if (tabs.length) activeTab.value = tabs[tabs.length - 1].id;
+    targetTab.resultTabs = tabs;
+    if (tabs.length) targetTab.activeTab = tabs[tabs.length - 1].id;
     const sel = results.find((r) => r.type === 'select');
-    if (sel) resultMeta.value = `返回 ${sel.rows.length} 行`;
-    else if (errRes) resultMeta.value = `第 ${errRes.index} 条语句执行失败`;
-    else resultMeta.value = `影响 ${results[results.length - 1].affected} 行`;
+    if (sel) targetTab.resultMeta = `返回 ${sel.rows.length} 行`;
+    else if (errRes) targetTab.resultMeta = `第 ${errRes.index} 条语句执行失败`;
+    else targetTab.resultMeta = `影响 ${results[results.length - 1].affected} 行`;
   } catch (e) { ElMessage.error('执行失败: ' + e.message); }
   finally { loading.value = false; }
 }
 
 function openResultTab(tab) {
-  const id = 'tab_' + Date.now();
+  const id = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
   tab.id = id;
+  tab.connId = tab.connId || connection.value.id;
   resultTabs.value = [tab];
   activeTab.value = id;
 }
@@ -883,7 +916,7 @@ function triggerDownload(url, filename) {
 async function exportTable(data) {
   if (!data) return;
   const db = data.database || currentDb.value;
-  const connId = connection.value.id;
+  const connId = data.connId || activeConnId.value || connection.value.id;
   // 查询结果导出（query 类型：按 SELECT 语句导出结果集）
   if (data.kind === 'query' && data.sql) {
     try {
