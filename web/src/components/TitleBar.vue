@@ -1,5 +1,5 @@
 <template>
-  <div class="title-bar" :class="{ 'is-mac': isMac }">
+  <div class="title-bar" :class="{ 'is-mac': isMac, 'is-fullscreen': isFullscreen }">
     <div class="tb-left">
       <img v-if="iconSrc" :src="iconSrc" class="tb-icon" alt="logo" />
       <span class="tb-title">NavCove</span>
@@ -82,20 +82,25 @@ const isMac = computed(() => {
 });
 
 const isMax = ref(false);
+const isFullscreen = ref(false);
 const iconSrc = '/icon.png';
 let offMaxChange = null;
+let offFullscreenChange = null;
 
 onMounted(async () => {
   if (window.navcove?.window) {
     try {
       isMax.value = await window.navcove.window.isMaximized();
       offMaxChange = window.navcove.window.onMaximizeChange((val) => { isMax.value = val; });
+      isFullscreen.value = await window.navcove.window.isFullscreen();
+      offFullscreenChange = window.navcove.window.onFullscreenChange((val) => { isFullscreen.value = val; });
     } catch (e) {}
   }
 });
 
 onUnmounted(() => {
   if (offMaxChange) offMaxChange();
+  if (offFullscreenChange) offFullscreenChange();
 });
 
 function onToggleSidebar() { emit('toggle-sidebar'); }
@@ -127,8 +132,9 @@ function onClose()    { window.navcove?.window?.close?.(); }
   padding-left: 12px;
 }
 .tb-right { padding-left: 0; padding-right: 0; }
-/* macOS 原生交通灯按钮在左侧，留出空间避免遮挡 logo/标题 */
+/* macOS 原生交通灯按钮在左侧，留出空间避免遮挡 logo/标题；全屏时交通灯隐藏，去掉偏移 */
 .title-bar.is-mac .tb-left { padding-left: 80px; }
+.title-bar.is-mac.is-fullscreen .tb-left { padding-left: 12px; }
 .tb-icon {
   width: 20px;
   height: 20px;

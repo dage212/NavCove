@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('navcove', {
       const handler = (_, val) => cb(val);
       ipcRenderer.on('win-maximize-changed', handler);
       return () => ipcRenderer.removeListener('win-maximize-changed', handler);
+    },
+    isFullscreen: () => ipcRenderer.invoke('win-is-fullscreen'),
+    onFullscreenChange: (cb) => {
+      const handler = (_, val) => cb(val);
+      ipcRenderer.on('win-fullscreen-changed', handler);
+      return () => ipcRenderer.removeListener('win-fullscreen-changed', handler);
     }
   }
 });

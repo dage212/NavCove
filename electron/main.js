@@ -158,6 +158,10 @@ async function createWindow() {
   ipcMain.handle('win-is-maximized', () => !!(mainWindow && mainWindow.isMaximized()));
   mainWindow.on('maximize', () => mainWindow.webContents.send('win-maximize-changed', true));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('win-maximize-changed', false));
+  // 全屏状态变化：macOS 全屏时原生交通灯会隐藏，渲染层需要据此去掉左侧偏移
+  ipcMain.handle('win-is-fullscreen', () => !!(mainWindow && mainWindow.isFullScreen()));
+  mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('win-fullscreen-changed', true));
+  mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('win-fullscreen-changed', false));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
