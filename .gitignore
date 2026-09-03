@@ -47,7 +47,11 @@ desktop.ini
 server/data/
 
 # ===== Electron 打包产物 =====
-release/
+# 忽略 release 内其它产物，但保留安装包
+release/**
+!release/**/
+!release/**/*.dmg
+!release/**/*.exe
 dist-electron/
 out/
 
