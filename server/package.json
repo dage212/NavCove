@@ -3,15 +3,19 @@
   "version": "1.0.0",
   "description": "Web-based database management tool (Navicat-like) - backend",
   "main": "app.js",
+  "engines": {
+    "node": "23.7.0"
+  },
   "scripts": {
     "start": "node app.js",
+    "predev": "npm run rebuild:sqlite:node --prefix ..",
     "dev": "nodemon --ignore data --ext js app.js"
   },
   "dependencies": {
     "@koa/cors": "^5.0.0",
     "@koa/multer": "^4.0.0",
     "@koa/router": "^13.1.0",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "11.10.0",
     "fast-csv": "^5.0.2",
     "koa": "^2.15.3",
     "koa-bodyparser": "^4.4.1",
