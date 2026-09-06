@@ -343,7 +343,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
+import { ref, reactive, computed, nextTick, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import CodeMirror from 'codemirror';
 import 'codemirror/lib/codemirror.css';
@@ -412,21 +412,6 @@ async function handleLogout() {
   logTabVisible.value = false;
   ElMessage.success('已退出登录');
 }
-
-onMounted(async () => {
-  // 启动时根据 token 判断登录状态
-  try {
-    const data = await api.me();
-    user.username = data.username;
-    user.name = data.name;
-    loggedIn.value = true;
-    await nextTick();
-  } catch (e) {
-    // 未登录，显示登录页
-    localStorage.removeItem('sqladmin_token');
-    loggedIn.value = false;
-  }
-});
 
 // ============ 编辑器 & 主逻辑 ============
 const editorRef = ref(null);
@@ -582,7 +567,7 @@ function initEditor() {
       'Cmd-/': toggleSqlComment
     }
   });
-  cmInstance.setValue('-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
+  cmInstance.setValue('-- 在此输入 SQL 语句，Ctrl+Enter 执行\n');
   // 确保正确计算尺寸（异步渲染场景下 fromTextArea 后可能高度为 0）
   setTimeout(() => { try { cmInstance && cmInstance.refresh(); } catch (e) {} }, 0);
 }
@@ -694,7 +679,7 @@ async function switchConnTab(id) {
   // 结果页签和表操作通过 tab.connId 固定绑定连接；切换时只重建当前页签组件。
   nextTick(() => {
     if (cmInstance) {
-      cmInstance.setValue(nextTab.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\nSELECT VERSION();\n');
+      cmInstance.setValue(nextTab.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\n');
     }
     treeRef.value?.setCurrentKey(null);
   });

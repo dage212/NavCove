@@ -15,11 +15,10 @@
   "scripts": {
     "dev:web": "cd web && npm run dev",
     "dev:server": "cd server && npm run dev",
-    "dev:electron": "concurrently -k -n web,electron -c cyan,green \"npm run dev:web\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
     "check:node": "node -e \"const need='23.7.0'; const cur=process.versions.node; if(cur!==need){ console.error('Node 版本必须是 '+need+'（当前 '+cur+'）。请执行: nvm use'); process.exit(1); }\"",
     "predev": "npm run check:node && npm run rebuild:sqlite:node",
     "predev:server": "npm run check:node",
-    "dev": "concurrently -k -n server,electron -c magenta,green \"npm run dev:server\" \"npm run dev:electron\"",
+    "dev": "concurrently -k -n server,web,electron -c magenta,cyan,green \"npm run dev:server\" \"npm run dev:web\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
     "build:web": "cd web && npm run build",
     "rebuild:sqlite:node": "npm rebuild better-sqlite3",
     "rebuild:sqlite:electron": "electron-builder install-app-deps",
