@@ -11,18 +11,18 @@
   >
     <el-form label-width="1px" class="export-sql-form">
       <div style="font-size:13px;color:#64748B;margin-bottom:10px;">
-        <span v-if="kind === 'database'">导出范围：</span>
-        <span v-else>导出表：</span>
+        <span v-if="kind === 'database'">{{ t('exportSql.scopeDb') }}</span>
+        <span v-else>{{ t('exportSql.scopeTable') }}</span>
         <el-tag size="small" style="margin-left:6px;">{{ scopeLabel }}</el-tag>
       </div>
       <el-form-item>
         <el-checkbox v-model="withSchema" :disabled="kind === 'database'" :indeterminate="indeterminate" @change="onCheckChange">
-          表结构（CREATE TABLE）
+          {{ t('exportSql.schema') }}
         </el-checkbox>
       </el-form-item>
       <el-form-item>
         <el-checkbox v-model="withData" :indeterminate="indeterminate" @change="onCheckChange">
-          数据（INSERT 语句）
+          {{ t('exportSql.data') }}
         </el-checkbox>
       </el-form-item>
       <el-form-item label=" " label-width="1px" style="margin-bottom:0;">
@@ -33,7 +33,7 @@
           controls-position="right"
           size="default"
         />
-        <span style="margin-left:8px;color:#86909c;font-size:12px;">导出行数（0 = 全部）</span>
+        <span style="margin-left:8px;color:#86909c;font-size:12px;">{{ t('exportSql.limitHint') }}</span>
       </el-form-item>
       <div v-if="tip" style="margin-top:8px;padding:8px 12px;background:#fff7e8;color:#8a5a00;border-radius:4px;font-size:12px;">
         {{ tip }}
@@ -41,10 +41,10 @@
     </el-form>
     <template #footer>
       <div class="conn-dialog-footer">
-        <el-button :disabled="loading" @click="$emit('update:visible', false)">取消</el-button>
+        <el-button :disabled="loading" @click="$emit('update:visible', false)">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="loading" :disabled="!canExport" @click="runExport">
           <el-icon><Download /></el-icon>
-          <span style="margin-left:4px">开始导出</span>
+          <span style="margin-left:4px">{{ t('exportSql.start') }}</span>
         </el-button>
       </div>
     </template>
@@ -56,6 +56,7 @@ import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Download } from '@element-plus/icons-vue';
 import api from '../api';
+import { t } from '../i18n';
 
 const props = defineProps({
   visible: Boolean,
@@ -76,13 +77,13 @@ const loading = ref(false);
 const indeterminate = computed(() => !withSchema.value && !withData.value);
 const canExport = computed(() => withSchema.value || withData.value);
 const tip = computed(() => {
-  if (!withSchema.value && !withData.value) return '请至少勾选一项（结构或数据）';
-  if (!withSchema.value) return '仅导出数据：不包含建表语句，导入时必须先有表结构';
-  if (!withData.value) return '仅导出结构：不包含 INSERT 数据，导入后表为空';
-  return '两项都勾选：导出 CREATE TABLE 结构 + INSERT 数据，可直接用该 .sql 文件完整还原';
+  if (!withSchema.value && !withData.value) return t('exportSql.needOne');
+  if (!withSchema.value) return t('exportSql.dataOnly');
+  if (!withData.value) return t('exportSql.schemaOnly');
+  return t('exportSql.both');
 });
 
-const dialogTitle = computed(() => props.kind === 'database' ? '导出数据库 SQL' : '导出表 SQL');
+const dialogTitle = computed(() => props.kind === 'database' ? t('exportSql.dbTitle') : t('exportSql.tableTitle'));
 const scopeLabel = computed(() => {
   if (props.kind === 'database') return `\`${props.database || ''}\``;
   return `\`${props.database || ''}\`.\`${props.table || ''}\``;
@@ -111,7 +112,7 @@ function triggerDownloadBlob(blob, filename) {
 }
 
 async function runExport() {
-  if (!props.conn || !props.conn.id) { ElMessage.error('未连接数据库'); return; }
+  if (!props.conn || !props.conn.id) { ElMessage.error(t('exportSql.notConnected')); return; }
   if (!canExport.value) return;
   const opts = {
     withSchema: withSchema.value,
@@ -121,30 +122,30 @@ async function runExport() {
   let url;
   let filename;
   if (props.kind === 'database') {
-    if (!props.database) { ElMessage.error('未指定数据库'); return; }
+    if (!props.database) { ElMessage.error(t('exportSql.noDb')); return; }
     url = api.exportSqlDatabaseUrl(props.conn.id, props.database, opts);
     filename = `${props.database}.sql`;
   } else {
-    if (!props.database || !props.table) { ElMessage.error('未指定表'); return; }
+    if (!props.database || !props.table) { ElMessage.error(t('exportSql.noTable')); return; }
     url = api.exportSqlTableUrl(props.conn.id, props.database, props.table, opts);
     filename = `${props.database}_${props.table}.sql`;
   }
   loading.value = true;
-  const infoMsg = ElMessage.info({ message: '正在导出，请稍候...', duration: 0 });
+  const infoMsg = ElMessage.info({ message: t('exportSql.exporting'), duration: 0 });
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
-      let msg = `导出失败 (HTTP ${resp.status})`;
-      try { const t = await resp.text(); if (t) msg = '导出失败：' + t; } catch (e2) {}
+      let msg = t('exportSql.fail', { message: 'HTTP ' + resp.status });
+      try { const body = await resp.text(); if (body) msg = t('exportSql.fail', { message: body }); } catch (e2) {}
       throw new Error(msg);
     }
     const blob = await resp.blob();
     triggerDownloadBlob(blob, filename);
-    ElMessage.success('导出完成');
+    ElMessage.success(t('exportSql.done'));
     emit('done', { kind: props.kind, database: props.database, table: props.table, opts });
     emit('update:visible', false);
   } catch (e) {
-    ElMessage.error('导出失败：' + (e.message || e));
+    ElMessage.error(t('exportSql.fail', { message: e.message || e }));
   } finally {
     loading.value = false;
     if (infoMsg && infoMsg.close) infoMsg.close();

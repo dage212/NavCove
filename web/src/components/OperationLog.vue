@@ -5,25 +5,25 @@
       <el-date-picker
         v-model="dateRange"
         type="daterange"
-        range-separator="至"
-        start-placeholder="开始日期"
-        end-placeholder="结束日期"
+        :range-separator="t('log.to')"
+        :start-placeholder="t('log.startDate')"
+        :end-placeholder="t('log.endDate')"
         size="small"
         value-format="YYYY-MM-DD"
         style="width:260px"
       />
-      <el-select v-model="username" size="small" placeholder="人员" clearable filterable style="width:140px">
+      <el-select v-model="username" size="small" :placeholder="t('log.user')" clearable filterable style="width:140px">
         <el-option v-for="u in users" :key="u" :label="u" :value="u" />
       </el-select>
-      <el-select v-model="sqlType" size="small" placeholder="SQL 类型" clearable style="width:140px">
-        <el-option label="全部" value="" />
-        <el-option v-for="t in typeOptions" :key="t.value" :label="t.label" :value="t.value" />
+      <el-select v-model="sqlType" size="small" :placeholder="t('log.sqlType')" clearable style="width:140px">
+        <el-option :label="t('log.all')" value="" />
+        <el-option v-for="opt in typeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
       </el-select>
-      <el-input v-model="keyword" size="small" placeholder="搜索 SQL/库/连接" clearable style="width:200px" @keyup.enter="search" />
-      <el-button size="small" type="primary" @click="search">查询</el-button>
-      <el-button size="small" @click="resetFilter">重置</el-button>
+      <el-input v-model="keyword" size="small" :placeholder="t('log.searchPh')" clearable style="width:200px" @keyup.enter="search" />
+      <el-button size="small" type="primary" @click="search">{{ t('log.query') }}</el-button>
+      <el-button size="small" @click="resetFilter">{{ t('log.reset') }}</el-button>
       <div style="flex:1"></div>
-      <span class="oplog-stat">共 {{ total }} 条</span>
+      <span class="oplog-stat">{{ t('log.total', { n: total }) }}</span>
     </div>
 
     <!-- 类型统计标签 -->
@@ -36,18 +36,17 @@
     <!-- 表格 -->
     <div class="oplog-table">
       <el-table :data="rows" border stripe size="small" height="100%" @row-dblclick="onRowDbl">
-        <el-table-column prop="created_at" label="时间" width="160" fixed />
-        <el-table-column prop="username" label="操作人" width="100" />
-        <el-table-column prop="conn_name" label="连接" width="120" show-overflow-tooltip />
-        <el-table-column prop="database" label="数据库" width="120" show-overflow-tooltip />
-        <el-table-column prop="sql_type" label="类型" width="90">
+        <el-table-column prop="created_at" :label="t('log.time')" width="160" fixed />
+        <el-table-column prop="username" :label="t('log.operator')" width="100" />
+        <el-table-column prop="database" :label="t('log.database')" width="120" show-overflow-tooltip />
+        <el-table-column prop="sql_type" :label="t('log.type')" width="90">
           <template #default="{ row }">
             <el-tag :type="typeTag(row.sql_type)" size="small">{{ row.sql_type }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="sql_text" label="SQL 语句" min-width="320" show-overflow-tooltip />
-        <el-table-column prop="affected" label="影响行数" width="90" align="right" />
-        <el-table-column prop="status" label="状态" width="80" fixed="right">
+        <el-table-column prop="sql_text" :label="t('log.sql')" min-width="320" show-overflow-tooltip />
+        <el-table-column prop="affected" :label="t('log.affected')" width="90" align="right" />
+        <el-table-column prop="status" :label="t('log.status')" width="80" fixed="right">
           <template #default="{ row }">
             <el-tag :type="row.status === 'success' ? 'success' : (row.status === 'partial' ? 'warning' : 'danger')" size="small">{{ row.status }}</el-tag>
           </template>
@@ -70,16 +69,15 @@
     </div>
 
     <!-- SQL 详情 -->
-    <el-dialog v-model="detailVisible" title="SQL 详情" width="760px" append-to-body>
+    <el-dialog v-model="detailVisible" :title="t('log.detail')" width="760px" append-to-body>
       <el-descriptions v-if="curRow" :column="2" border size="small">
-        <el-descriptions-item label="时间">{{ curRow.created_at }}</el-descriptions-item>
-        <el-descriptions-item label="操作人">{{ curRow.username }}</el-descriptions-item>
-        <el-descriptions-item label="连接">{{ curRow.conn_name }}</el-descriptions-item>
-        <el-descriptions-item label="数据库">{{ curRow.database }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ curRow.sql_type }}</el-descriptions-item>
-        <el-descriptions-item label="影响行数">{{ curRow.affected }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ curRow.status }}</el-descriptions-item>
-        <el-descriptions-item label="错误" :span="2">{{ curRow.error || '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.time')">{{ curRow.created_at }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.operator')">{{ curRow.username }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.database')">{{ curRow.database }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.type')">{{ curRow.sql_type }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.affected')">{{ curRow.affected }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.status')">{{ curRow.status }}</el-descriptions-item>
+        <el-descriptions-item :label="t('log.error')" :span="2">{{ curRow.error || '—' }}</el-descriptions-item>
       </el-descriptions>
       <pre v-if="curRow" class="oplog-sql-detail">{{ curRow.sql_text }}</pre>
     </el-dialog>
@@ -87,9 +85,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+import { t } from '../i18n';
 
 const dateRange = ref([]);
 const username = ref('');
@@ -105,8 +104,8 @@ const detailVisible = ref(false);
 const curRow = ref(null);
 
 // 下拉选项：Select/Insert/Update/Delete/Alter/非Select 等
-const typeOptions = [
-  { label: '非 Select', value: 'NON_SELECT' },
+const typeOptions = computed(() => [
+  { label: t('log.nonSelect'), value: 'NON_SELECT' },
   { label: 'SELECT', value: 'SELECT' },
   { label: 'INSERT', value: 'INSERT' },
   { label: 'UPDATE', value: 'UPDATE' },
@@ -115,8 +114,8 @@ const typeOptions = [
   { label: 'CREATE', value: 'CREATE' },
   { label: 'DROP', value: 'DROP' },
   { label: 'TRUNCATE', value: 'TRUNCATE' },
-  { label: '其他', value: 'OTHER' }
-];
+  { label: t('log.other'), value: 'OTHER' }
+]);
 
 function typeTag(t) {
   const m = {
@@ -140,7 +139,7 @@ async function load() {
     rows.value = data.rows || [];
     total.value = data.total || 0;
     stats.value = data.stats || [];
-  } catch (e) { ElMessage.error('加载日志失败：' + e.message); }
+  } catch (e) { ElMessage.error(t('log.loadFail', { message: e.message })); }
 }
 
 async function loadUsers() {

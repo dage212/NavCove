@@ -1,4 +1,5 @@
 <template>
+  <el-config-provider :locale="elLocale">
   <div class="app-root">
     <Title-bar
       :logged-in="loggedIn"
@@ -9,6 +10,7 @@
       @open-conn="openConnDialog"
       @logout="handleUserCommand('logout')"
       @view-log="openLogTab"
+      @settings="settingsVisible = true"
     />
   <!-- 登录页 -->
   <div v-if="!loggedIn" class="login-page">
@@ -16,35 +18,35 @@
       <img v-if="loginLogoSrc" :src="loginLogoSrc" class="logo-big" alt="NavCove Logo" />
       <div v-else class="logo-big">🐬</div>
       <h1>NavCove</h1>
-      <div class="sub-title">企业级数据库管理平台</div>
+      <div class="sub-title">{{ t('login.subtitle') }}</div>
       <div class="features">
-        <div class="ft"><span class="ft-icon"><el-icon><Coin /></el-icon></span>支持 MySQL / Redis 多连接管理</div>
-        <div class="ft"><span class="ft-icon"><el-icon><Promotion /></el-icon></span>在线 SQL 编辑器 · 语法高亮 · 智能补全</div>
-        <div class="ft"><span class="ft-icon"><el-icon><Edit /></el-icon></span>表数据可视化编辑 · 暂存确认 · 批量导入导出</div>
-        <div class="ft"><span class="ft-icon"><el-icon><Lock /></el-icon></span>安全鉴权 · 数据操作留痕</div>
+        <div class="ft"><span class="ft-icon"><el-icon><Coin /></el-icon></span>{{ t('login.feat1') }}</div>
+        <div class="ft"><span class="ft-icon"><el-icon><Promotion /></el-icon></span>{{ t('login.feat2') }}</div>
+        <div class="ft"><span class="ft-icon"><el-icon><Edit /></el-icon></span>{{ t('login.feat3') }}</div>
+        <div class="ft"><span class="ft-icon"><el-icon><Lock /></el-icon></span>{{ t('login.feat4') }}</div>
       </div>
       <div class="copyright">© 2026 NavCove · Powered by Vue 3 + Koa</div>
     </div>
     <div class="login-right">
       <div class="login-box">
-        <h2 class="login-title">欢迎登录</h2>
-        <p class="login-sub">请输入账号密码以登录管理平台</p>
+        <h2 class="login-title">{{ t('login.welcome') }}</h2>
+        <p class="login-sub">{{ t('login.pleaseInput') }}</p>
         <el-form class="login-form" @submit.prevent="handleLogin">
           <el-form-item>
-            <el-input v-model="loginForm.username" size="large" placeholder="用户名" @keyup.enter="handleLogin">
+            <el-input v-model="loginForm.username" size="large" :placeholder="t('login.username')" @keyup.enter="handleLogin">
               <template #prefix><el-icon><User /></el-icon></template>
             </el-input>
           </el-form-item>
           <el-form-item>
-            <el-input v-model="loginForm.password" type="password" size="large" placeholder="密码" show-password @keyup.enter="handleLogin">
+            <el-input v-model="loginForm.password" type="password" size="large" :placeholder="t('login.password')" show-password @keyup.enter="handleLogin">
               <template #prefix><el-icon><Lock /></el-icon></template>
             </el-input>
           </el-form-item>
-          <el-button type="primary" class="login-btn" :loading="loginLoading" @click="handleLogin">登录</el-button>
+          <el-button type="primary" class="login-btn" :loading="loginLoading" @click="handleLogin">{{ t('login.submit') }}</el-button>
         </el-form>
         <div class="tip-box">
           <el-icon><InfoFilled /></el-icon>
-          <span>默认账号：<b>admin</b> / 密码：<b>123456</b></span>
+          <span>{{ t('login.defaultAccount') }}<b>admin</b> / {{ t('login.defaultPassword') }}<b>123456</b></span>
         </div>
       </div>
     </div>
@@ -69,11 +71,11 @@
         <!-- 操作日志页签（可关闭隐藏） -->
         <div v-if="logTabVisible" class="conn-tab log-tab" :class="{ active: showLogTab }" @click="openLogTab">
           <el-icon class="conn-tab-icon"><Document /></el-icon>
-          <span class="conn-tab-name">操作日志</span>
+          <span class="conn-tab-name">{{ t('log.tab') }}</span>
           <el-icon class="conn-tab-close" @click.stop="closeLogTab"><Close /></el-icon>
         </div>
       </div>
-      <el-button class="conn-tab-add" text @click="openConnDialog" title="新建连接">
+      <el-button class="conn-tab-add" text @click="openConnDialog" :title="t('conn.newConn')">
         <el-icon><Plus /></el-icon>
       </el-button>
     </div>
@@ -90,14 +92,14 @@
               <el-breadcrumb-item v-if="currentDb" class="crumb-db">{{ currentDb }}</el-breadcrumb-item>
               <el-breadcrumb-item v-if="currentTable" class="crumb-table">{{ currentTable }}</el-breadcrumb-item>
             </el-breadcrumb>
-            <span v-else class="title">未连接</span>
+            <span v-else class="title">{{ t('sidebar.disconnected') }}</span>
           </template>
         </div>
         <div class="sidebar-tree">
           <div v-if="!connected" class="sidebar-empty">
             <el-icon style="font-size:34px;color:#94A3B8"><Coin /></el-icon>
-            <p style="margin:10px 0 0">暂无连接</p>
-            <el-button type="primary" size="small" plain @click="openConnDialog">立即连接</el-button>
+            <p style="margin:10px 0 0">{{ t('sidebar.empty') }}</p>
+            <el-button type="primary" size="small" plain @click="openConnDialog">{{ t('sidebar.connectNow') }}</el-button>
           </div>
           <el-tree
             v-else
@@ -141,12 +143,12 @@
         <!-- SQL 编辑器 -->
         <div class="editor-pane">
           <div class="editor-head">
-            <span class="label">{{ isRedis ? '命令' : 'SQL 编辑器' }}</span>
+            <span class="label">{{ isRedis ? t('editor.command') : t('editor.sql') }}</span>
             <el-select
               v-model="databaseSelect"
               size="small"
               class="db-select"
-              :placeholder="isRedis ? '选择库' : '选择数据库'"
+              :placeholder="isRedis ? t('editor.pickRedisDb') : t('editor.pickDb')"
               style="width: 180px; margin-left: 12px;"
               @change="onDbChange"
               :disabled="!connected"
@@ -155,11 +157,11 @@
             </el-select>
             <div class="spacer"></div>
             <el-button-group size="small">
-              <el-button @click="formatSql"><el-icon><MagicStick /></el-icon><span style="margin-left:4px">美化</span></el-button>
-              <el-button @click="clearSql"><el-icon><Delete /></el-icon><span style="margin-left:4px">清空</span></el-button>
+              <el-button @click="formatSql"><el-icon><MagicStick /></el-icon><span style="margin-left:4px">{{ t('editor.format') }}</span></el-button>
+              <el-button @click="clearSql"><el-icon><Delete /></el-icon><span style="margin-left:4px">{{ t('editor.clear') }}</span></el-button>
             </el-button-group>
             <el-button size="small" type="primary" @click="runSql" :loading="loading" :disabled="!connected">
-              <el-icon><CaretRight /></el-icon><span style="margin-left:4px">执行</span>
+              <el-icon><CaretRight /></el-icon><span style="margin-left:4px">{{ t('editor.run') }}</span>
             </el-button>
           </div>
           <div class="editor-body" :style="{ height: editorHeight + 'px' }">
@@ -177,7 +179,7 @@
         <!-- 结果区 -->
         <div class="result-pane">
           <div class="result-head">
-            <span class="label">结果</span>
+            <span class="label">{{ t('result.title') }}</span>
             <span v-if="resultMeta" class="meta">{{ resultMeta }}</span>
             <div class="spacer"></div>
           </div>
@@ -186,10 +188,10 @@
               <div class="empty-icon-wrap">
                 <el-icon class="empty-icon"><DataAnalysis /></el-icon>
               </div>
-              <span v-if="currentDb" class="empty-text">{{ isRedis ? '执行命令或选择左侧 key 查看数据' : '执行 SQL 或选择左侧表查看数据' }}</span>
+              <span v-if="currentDb" class="empty-text">{{ isRedis ? t('result.emptyRedis') : t('result.emptySql') }}</span>
               <template v-else>
-                <span class="empty-title">{{ isRedis ? '未选择 Redis 库' : '未选择数据库' }}</span>
-                <span class="empty-desc">{{ isRedis ? '请从左侧选择一个库和 key' : '请从左侧库表树中选择一个数据库和表' }}</span>
+                <span class="empty-title">{{ isRedis ? t('result.noRedisTitle') : t('result.noDbTitle') }}</span>
+                <span class="empty-desc">{{ isRedis ? t('result.noRedisDesc') : t('result.noDbDesc') }}</span>
               </template>
             </div>
             <el-tabs v-else-if="resultTabs.length" v-model="activeTab" class="result-tabs" type="card">
@@ -241,91 +243,91 @@
       <!-- Redis 库菜单 -->
       <template v-if="isRedis && contextMenu.kind === 'database'">
         <li class="ctx-item" @click="onCtxCommand('create-redis-key')">
-          <el-icon><CirclePlus /></el-icon><span>新建 key</span>
+          <el-icon><CirclePlus /></el-icon><span>{{ t('ctx.newKey') }}</span>
         </li>
       </template>
       <!-- Redis key 菜单 -->
       <template v-else-if="isRedis">
         <li class="ctx-item" @click="onCtxCommand('rename-redis-key')">
-          <el-icon><EditPen /></el-icon><span>重命名</span>
+          <el-icon><EditPen /></el-icon><span>{{ t('ctx.rename') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('truncate')">
-          <el-icon><DeleteFilled /></el-icon><span>清空</span>
+          <el-icon><DeleteFilled /></el-icon><span>{{ t('ctx.empty') }}</span>
         </li>
         <li class="ctx-item ctx-danger" @click="onCtxCommand('drop')">
-          <el-icon><Delete /></el-icon><span>删除 key</span>
+          <el-icon><Delete /></el-icon><span>{{ t('ctx.deleteKey') }}</span>
         </li>
       </template>
       <!-- 数据库菜单 -->
       <template v-else-if="contextMenu.kind === 'database'">
         <li class="ctx-item" @click="onCtxCommand('create-db')">
-          <el-icon><CirclePlus /></el-icon><span>新建数据库</span>
+          <el-icon><CirclePlus /></el-icon><span>{{ t('ctx.newDatabase') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('create')">
-          <el-icon><CirclePlus /></el-icon><span>新建表</span>
+          <el-icon><CirclePlus /></el-icon><span>{{ t('ctx.newTable') }}</span>
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('view-db-structure')">
-          <el-icon><Menu /></el-icon><span>查看库结构</span>
+          <el-icon><Menu /></el-icon><span>{{ t('ctx.viewDbStructure') }}</span>
         </li>
         <li class="ctx-item ctx-danger" @click="onCtxCommand('drop-db')">
-          <el-icon><Delete /></el-icon><span>删除数据库</span>
+          <el-icon><Delete /></el-icon><span>{{ t('ctx.dropDatabase') }}</span>
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('import-db')">
-          <el-icon><Download /></el-icon><span>导入 CSV</span>
+          <el-icon><Download /></el-icon><span>{{ t('ctx.importCsv') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('export-db')">
-          <el-icon><Upload /></el-icon><span>导出 CSV</span>
+          <el-icon><Upload /></el-icon><span>{{ t('ctx.exportCsv') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('export-db-sql')">
-          <el-icon><Connection /></el-icon><span>导出 SQL</span>
+          <el-icon><Connection /></el-icon><span>{{ t('ctx.exportSql') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('import-db-sql')">
-          <el-icon><Document /></el-icon><span>导入 SQL</span>
+          <el-icon><Document /></el-icon><span>{{ t('ctx.importSql') }}</span>
         </li>
       </template>
       <!-- 表菜单 -->
       <template v-else>
         <li class="ctx-item" @click="onCtxCommand('view-table-structure')">
-          <el-icon><Menu /></el-icon><span>查看表结构</span>
+          <el-icon><Menu /></el-icon><span>{{ t('ctx.viewTableStructure') }}</span>
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('rename')">
-          <el-icon><EditPen /></el-icon><span>重命名</span>
+          <el-icon><EditPen /></el-icon><span>{{ t('ctx.rename') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('copy')">
-          <el-icon><CopyDocument /></el-icon><span>复制表</span>
+          <el-icon><CopyDocument /></el-icon><span>{{ t('ctx.copyTable') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('truncate')">
-          <el-icon><DeleteFilled /></el-icon><span>清空表</span>
+          <el-icon><DeleteFilled /></el-icon><span>{{ t('ctx.truncateTable') }}</span>
         </li>
         <li class="ctx-item ctx-danger" @click="onCtxCommand('drop')">
-          <el-icon><Delete /></el-icon><span>删除表</span>
+          <el-icon><Delete /></el-icon><span>{{ t('ctx.dropTable') }}</span>
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('import')">
-          <el-icon><Upload /></el-icon><span>导入 CSV</span>
+          <el-icon><Upload /></el-icon><span>{{ t('ctx.importCsv') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('export')">
-          <el-icon><Download /></el-icon><span>导出 CSV</span>
+          <el-icon><Download /></el-icon><span>{{ t('ctx.exportCsv') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('export-sql')">
-          <el-icon><Connection /></el-icon><span>导出 SQL</span>
+          <el-icon><Connection /></el-icon><span>{{ t('ctx.exportSql') }}</span>
         </li>
         <li class="ctx-item" @click="onCtxCommand('import-sql')">
-          <el-icon><Document /></el-icon><span>导入 SQL</span>
+          <el-icon><Document /></el-icon><span>{{ t('ctx.importSql') }}</span>
         </li>
       </template>
     </ul>
 
     <!-- 新建表对话框 -->
-    <el-dialog v-model="redisKeyDialog.visible" title="新建 Redis key" width="420px" :close-on-click-modal="false">
+    <el-dialog v-model="redisKeyDialog.visible" :title="t('redisKey.title')" width="420px" :close-on-click-modal="false">
       <el-form :model="redisKeyDialog" label-width="72px">
-        <el-form-item label="库">
+        <el-form-item :label="t('redisKey.db')">
           <el-input :model-value="'DB ' + redisKeyDialog.database" disabled />
         </el-form-item>
-        <el-form-item label="类型">
+        <el-form-item :label="t('redisKey.type')">
           <el-select v-model="redisKeyDialog.redisType" style="width:100%">
             <el-option label="string" value="string" />
             <el-option label="hash" value="hash" />
@@ -335,7 +337,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Key">
-          <el-input v-model="redisKeyDialog.name" placeholder="例如 demo:newkey" />
+          <el-input v-model="redisKeyDialog.name" :placeholder="t('redisKey.namePh')" />
         </el-form-item>
         <el-form-item v-if="redisKeyDialog.redisType === 'hash'" label="Field">
           <el-input v-model="redisKeyDialog.field" placeholder="field" />
@@ -347,12 +349,12 @@
           <el-input-number v-model="redisKeyDialog.score" controls-position="right" style="width:100%" />
         </el-form-item>
         <el-form-item v-if="redisKeyDialog.redisType !== 'zset'" label="Value">
-          <el-input v-model="redisKeyDialog.value" placeholder="初始值，可留空" />
+          <el-input v-model="redisKeyDialog.value" :placeholder="t('redisKey.valuePh')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="redisKeyDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="redisKeyDialog.saving" @click="confirmCreateRedisKey">创建</el-button>
+        <el-button @click="redisKeyDialog.visible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="redisKeyDialog.saving" @click="confirmCreateRedisKey">{{ t('common.create') }}</el-button>
       </template>
     </el-dialog>
     <create-table-dialog v-model:visible="createTableDialog.visible" :conn="connection" :database="createTableDialog.database" @done="onTableCreated" />
@@ -379,7 +381,7 @@
         <p class="drop-warn-text">
           {{ dropDialog.message }}
         </p>
-        <p class="drop-hint">请输入 <b>{{ dropDialog.targetName }}</b> 以确认{{ dropDialog.kind === 'truncate' ? '清空' : '删除' }}：</p>
+        <p class="drop-hint">{{ dropDialog.kind === 'truncate' ? t('drop.hintTruncate', { name: dropDialog.targetName }) : t('drop.hintDelete', { name: dropDialog.targetName }) }}</p>
         <el-input
           v-model="dropDialog.inputName"
           style="margin-top: 4px"
@@ -387,12 +389,14 @@
         />
       </div>
       <template #footer>
-        <el-button type="primary" @click="dropDialog.visible = false">取消</el-button>
-        <el-button :disabled="!dropCanConfirm" @click="confirmDrop">删除</el-button>
+        <el-button type="primary" @click="dropDialog.visible = false">{{ t('common.cancel') }}</el-button>
+        <el-button :disabled="!dropCanConfirm" @click="confirmDrop">{{ t('common.delete') }}</el-button>
       </template>
     </el-dialog>
+    <settings-dialog v-model:visible="settingsVisible" />
   </div>
   </div>
+  </el-config-provider>
 </template>
 
 <script setup>
@@ -416,6 +420,12 @@ import ExportSqlDialog from './components/ExportSqlDialog.vue';
 import StructureView from './components/StructureView.vue';
 import TitleBar from './components/TitleBar.vue';
 import OperationLog from './components/OperationLog.vue';
+import SettingsDialog from './components/SettingsDialog.vue';
+import { t, elLocale, locale } from './i18n';
+import zhCN from './i18n/zh-CN';
+import enUS from './i18n/en-US';
+
+const settingsVisible = ref(false);
 
 // ============ 登录 ============
 const loggedIn = ref(false);
@@ -426,16 +436,16 @@ const userInitial = computed(() => (user.name || user.username || 'A').charAt(0)
 const loginLogoSrc = '/icon.png';
 
 async function handleLogin() {
-  if (!loginForm.username || !loginForm.password) { ElMessage.warning('请输入用户名和密码'); return; }
+  if (!loginForm.username || !loginForm.password) { ElMessage.warning(t('login.needAccount')); return; }
   loginLoading.value = true;
   try {
     const data = await api.login(loginForm.username, loginForm.password);
     user.username = data.username;
     user.name = data.name;
     loggedIn.value = true;
-    ElMessage.success(`欢迎，${data.name || data.username}`);
+    ElMessage.success(t('login.welcomeUser', { name: data.name || data.username }));
   } catch (e) {
-    ElMessage.error(e.message || '登录失败');
+    ElMessage.error(e.message || t('login.failed'));
   } finally {
     loginLoading.value = false;
   }
@@ -453,7 +463,7 @@ function closeLogTab() { logTabVisible.value = false; showLogTab.value = false; 
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning', confirmButtonText: '退出', cancelButtonText: '取消' });
+    await ElMessageBox.confirm(t('auth.logoutConfirm'), t('common.tip'), { type: 'warning', confirmButtonText: t('auth.logoutOk'), cancelButtonText: t('common.cancel') });
   } catch (e) { return; }
   try { await api.logout(); } catch (e) {}
   loggedIn.value = false;
@@ -463,7 +473,7 @@ async function handleLogout() {
   treeRenderKey.value = '';
   showLogTab.value = false;
   logTabVisible.value = false;
-  ElMessage.success('已退出登录');
+  ElMessage.success(t('auth.loggedOut'));
 }
 
 // ============ 编辑器 & 主逻辑 ============
@@ -495,9 +505,7 @@ const resultMeta = computed({ get: () => curConn.value?.resultMeta ?? '', set: (
 const connected = computed(() => connTabs.value.length > 0 && !!curConn.value);
 const isRedis = computed(() => connection.value.type === 'redis');
 function editorHint(conn) {
-  return (conn && conn.type === 'redis')
-    ? '# 输入 Redis 命令，Ctrl+Enter 执行\n'
-    : '-- 在此输入 SQL 语句，Ctrl+Enter 执行\n';
+  return (conn && conn.type === 'redis') ? t('editor.hintRedis') : t('editor.hintSql');
 }
 function dbNodeLabel(name, conn) {
   return (conn && conn.type === 'redis') ? ('DB ' + name) : name;
@@ -649,7 +657,7 @@ function initEditor() {
       'Cmd-/': toggleSqlComment
     }
   });
-  cmInstance.setValue('-- 在此输入 SQL 语句，Ctrl+Enter 执行\n');
+  cmInstance.setValue(editorHint(connection.value));
   // 确保正确计算尺寸（异步渲染场景下 fromTextArea 后可能高度为 0）
   setTimeout(() => { try { cmInstance && cmInstance.refresh(); } catch (e) {} }, 0);
 }
@@ -669,6 +677,12 @@ watch(editorRef, (el) => {
   if (el && loggedIn.value && !editorInited) {
     nextTick(() => initEditor());
   }
+});
+watch(locale, () => {
+  if (!cmInstance) return;
+  const cur = cmInstance.getValue();
+  const hints = [zhCN.editor.hintSql, zhCN.editor.hintRedis, enUS.editor.hintSql, enUS.editor.hintRedis];
+  if (hints.includes(cur)) cmInstance.setValue(editorHint(connection.value));
 });
 
 function openConnDialog() { connDialogVisible.value = true; }
@@ -690,7 +704,7 @@ async function onConnected(conn) {
   // 创建新连接选项卡
   const newTab = {
     id: tabId,
-    name: conn.name || conn.host || `连接${connTabs.value.length + 1}`,
+    name: conn.name || conn.host || t('conn.tabFallback', { n: connTabs.value.length + 1 }),
     connection: { ...conn },
     databases: [],
     currentDb: '',
@@ -716,7 +730,7 @@ async function onConnected(conn) {
     targetTab.databases = mapDbList(databasesForTab);
     targetTab.treeData = mapDbTree(databasesForTab, newTab.connection, newTab.id);
   } catch (e) {
-    ElMessage.error('获取数据库列表失败: ' + e.message);
+    ElMessage.error(t('conn.listFailed', { message: e.message }));
   }
 
   // 新建连接后只保留数据库列表，不自动查询或打开第一张表。
@@ -785,7 +799,7 @@ function closeConnTab(id) {
 
 async function loadDatabases() {
   try { databases.value = mapDbList(await api.listDatabases(connection.value.id)); }
-  catch (e) { ElMessage.error('获取数据库列表失败: ' + e.message); }
+  catch (e) { ElMessage.error(t('conn.listFailed', { message: e.message })); }
 }
 
 async function refreshTree() {
@@ -817,7 +831,7 @@ async function loadNode(node, resolve) {
       })));
     } catch (e) {
       if (activeConnId.value === requestTabId) {
-        ElMessage.error((requestConn.connection.type === 'redis' ? '加载 key 失败: ' : '加载表失败: ') + e.message);
+        ElMessage.error((requestConn.connection.type === 'redis' ? t('conn.loadKeysFailed', { message: e.message }) : t('conn.loadTablesFailed', { message: e.message })));
       }
       resolve([]);
     }
@@ -844,7 +858,7 @@ function onDbChange(val) {
     curConn.value.databaseSelect = val || '';
     curConn.value.currentDb = val || '';
   }
-  if (val) ElMessage.success({ message: isRedis.value ? `已切换到 DB ${val}` : `已切换到数据库: ${val}`, duration: 1500 });
+  if (val) ElMessage.success({ message: isRedis.value ? t('result.switchedRedis', { name: val }) : t('result.switchedDb', { name: val }), duration: 1500 });
 }
 
 async function viewTableData(data) {
@@ -865,7 +879,7 @@ async function viewTableData(data) {
         label: data.name
       });
     } catch (e) {
-      ElMessage.error('读取 key 失败: ' + e.message);
+      ElMessage.error(t('result.readKeyFail', { message: e.message }));
     }
     return;
   }
@@ -894,25 +908,54 @@ function parseTableName(sql, fallbackDb) {
   return { database, table };
 }
 
+function sqlTouchesDatabases(sql) {
+  return /\b(create|drop|alter)\s+(database|schema)\b/i.test(sql || '');
+}
+
+function sqlTouchesTree(sql, redis) {
+  if (!sql) return false;
+  const text = String(sql)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/--[^\n]*/g, '')
+    .replace(/#[^\n]*/g, '');
+  if (redis) {
+    return /\b(set|mset|del|unlink|rename|renamenx|flushdb|flushall|hset|hdel|rpush|lpush|lpop|rpop|lrem|lset|linsert|sadd|srem|zadd|zrem|xadd|move|copy|restore)\b/i.test(text);
+  }
+  return /\b(create|drop|alter|rename|truncate|insert|update|delete|replace)\b/i.test(text);
+}
+
+async function refreshTreeAfterExec(sql, db, redis) {
+  if (!sqlTouchesTree(sql, redis) && !sqlTouchesDatabases(sql)) return;
+  try {
+    if (sqlTouchesDatabases(sql)) await refreshTree();
+    if (db) reloadTablesOfDb(db);
+  } catch (e) {}
+}
+
 async function runSql() {
-  if (!connected.value) { ElMessage.warning('请先连接数据库'); return; }
+  if (!connected.value) { ElMessage.warning(t('result.needConnect')); return; }
   // 执行前锁定发起查询的页签与连接，返回后结果只写回该页签，避免切换页签后串到新页签。
   const execTabId = activeConnId.value;
   const execConnId = connection.value.id;
   const execDb = databaseSelect.value;
-  if (!execDb) { ElMessage.warning(isRedis.value ? '请先选择 Redis 库' : '请先在 SQL 编辑器下拉框中选择数据库'); return; }
+  const execIsRedis = isRedis.value;
+  if (!execDb) { ElMessage.warning(execIsRedis ? t('result.needRedisDb') : t('result.needDb')); return; }
   const sql = cmInstance.getValue();
-  if (!sql || !sql.trim()) { ElMessage.warning(isRedis.value ? '命令不能为空' : 'SQL 不能为空'); return; }
+  if (!sql || !sql.trim()) { ElMessage.warning(execIsRedis ? t('result.emptyCmdWarn') : t('result.emptySqlWarn')); return; }
   loading.value = true;
   if (curConn.value) curConn.value.resultMeta = '';
   try {
     const results = await api.query(execConnId, execDb, sql);
     const targetTab = connTabs.value.find((tab) => tab.id === execTabId);
     if (!targetTab) return;
-    if (!results.length) { ElMessage.success('执行完成'); return; }
+    if (!results.length) {
+      ElMessage.success(t('result.done'));
+      await refreshTreeAfterExec(sql, execDb, execIsRedis);
+      return;
+    }
     const errRes = results.find((r) => r.type === 'error');
     if (errRes) {
-      ElMessage.error(`第 ${errRes.index} 条语句执行失败（前 ${errRes.executed} 条已执行）: ${errRes.message}`);
+      ElMessage.error(t('result.stmtFail', { index: errRes.index, executed: errRes.executed, message: errRes.message }));
     }
     const tableInfo = parseTableName(sql, execDb);
     const tabs = results.filter((r) => r.type !== 'error').map((r, i) => {
@@ -920,14 +963,14 @@ async function runSql() {
       if (r.type === 'select') {
         return {
           ...base, kind: 'query',
-          label: `结果 ${i + 1} (${r.rows.length} 行)`,
+          label: t('result.tabQuery', { n: i + 1, rows: r.rows.length }),
           columns: r.fields, rows: r.rows,
           database: tableInfo?.database, table: tableInfo?.table, sql
         };
       } else {
         return {
           ...base, kind: 'write',
-          label: `执行 ${i + 1}`,
+          label: t('result.tabWrite', { n: i + 1 }),
           columns: ['affectedRows', 'insertId', 'changedRows'],
           rows: [{ affectedRows: r.affected, insertId: r.insertId, changedRows: r.changed }],
           writeInfo: r
@@ -937,10 +980,13 @@ async function runSql() {
     targetTab.resultTabs = tabs;
     if (tabs.length) targetTab.activeTab = tabs[tabs.length - 1].id;
     const sel = results.find((r) => r.type === 'select');
-    if (sel) targetTab.resultMeta = `返回 ${sel.rows.length} 行`;
-    else if (errRes) targetTab.resultMeta = `第 ${errRes.index} 条语句执行失败`;
-    else targetTab.resultMeta = `影响 ${results[results.length - 1].affected} 行`;
-  } catch (e) { ElMessage.error('执行失败: ' + e.message); }
+    if (sel) targetTab.resultMeta = t('result.metaRows', { n: sel.rows.length });
+    else if (errRes) targetTab.resultMeta = t('result.metaFail', { n: errRes.index });
+    else targetTab.resultMeta = t('result.metaAffected', { n: results[results.length - 1].affected });
+    if (results.some((r) => r.type !== 'error')) {
+      await refreshTreeAfterExec(sql, execDb, execIsRedis);
+    }
+  } catch (e) { ElMessage.error(t('result.execFail', { message: e.message })); }
   finally { loading.value = false; }
 }
 
@@ -962,11 +1008,11 @@ function clearSql() { if (cmInstance) cmInstance.setValue(''); }
 
 function formatSql() {
   if (!cmInstance) return;
-  if (isRedis.value) { ElMessage.info('Redis 命令无需美化'); return; }
+  if (isRedis.value) { ElMessage.info(t('editor.redisNoFormat')); return; }
   const sql = cmInstance.getValue();
   if (!sql.trim()) return;
   cmInstance.setValue(simpleFormat(sql));
-  ElMessage.success('已美化');
+  ElMessage.success(t('editor.formatted'));
 }
 
 function simpleFormat(sql) {
@@ -1010,8 +1056,8 @@ async function exportTable(data) {
         const blob = await api.exportQueryCsv(connId, db, data.sql);
         downloadBlob(blob, 'query_result.csv');
       }
-      ElMessage.success('导出成功');
-    } catch (e) { ElMessage.error('导出失败: ' + e.message); }
+      ElMessage.success(t('export.ok'));
+    } catch (e) { ElMessage.error(t('export.fail', { message: e.message })); }
     return;
   }
   // 整表导出（table 类型）
@@ -1019,12 +1065,12 @@ async function exportTable(data) {
   if (data.type === 'sql') {
     const url = api.exportSqlTableUrl(connId, db, data.name, { withSchema: true, withData: true });
     triggerDownload(url, `${db}_${data.name}.sql`);
-    ElMessage.success('开始导出 ' + data.name + ' SQL');
+    ElMessage.success(t('export.startSql', { name: data.name }));
     return;
   }
   const url = api.exportTableUrl(connId, db, data.name);
   triggerDownload(url, `${db}_${data.name}.csv`);
-  ElMessage.success('开始导出 ' + data.name);
+  ElMessage.success(t('export.start', { name: data.name }));
 }
 
 function downloadBlob(blob, filename) {
@@ -1133,7 +1179,7 @@ function openRedisKeyDialog(data) {
 }
 async function confirmCreateRedisKey() {
   const name = (redisKeyDialog.name || '').trim();
-  if (!name) { ElMessage.warning('请输入 key 名称'); return; }
+  if (!name) { ElMessage.warning(t('redisKey.needName')); return; }
   redisKeyDialog.saving = true;
   try {
     await api.createTable(connection.value.id, redisKeyDialog.database, name, {
@@ -1143,12 +1189,12 @@ async function confirmCreateRedisKey() {
       member: redisKeyDialog.member,
       score: redisKeyDialog.score
     });
-    ElMessage.success(`已创建 ${redisKeyDialog.redisType}「${name}」`);
+    ElMessage.success(t('redisKey.created', { type: redisKeyDialog.redisType, name }));
     redisKeyDialog.visible = false;
     await refreshTree();
     viewTableData({ name, database: redisKeyDialog.database, type: 'table' });
   } catch (e) {
-    ElMessage.error('创建失败: ' + e.message);
+    ElMessage.error(t('redisKey.failed', { message: e.message }));
   } finally {
     redisKeyDialog.saving = false;
   }
@@ -1237,7 +1283,7 @@ const exportSqlDialog = reactive({
 // 删除确认对话框（表/库共用）
 const dropDialog = reactive({
   visible: false,
-  title: '删除确认',
+  title: '',
   message: '',
   targetName: '',
   inputName: '',
@@ -1270,14 +1316,14 @@ function onExportSqlDone() {
 }
 function openDbStructureTab(data) {
   const database = (data && data.name) || currentDb.value;
-  if (!database) { ElMessage.warning('未选择数据库'); return; }
+  if (!database) { ElMessage.warning(t('structure.needDb')); return; }
   currentDb.value = database;
   const id = 'tab_' + Date.now();
   const tab = {
     id,
     kind: 'structure-db',
     database,
-    label: `库结构：${database}`
+    label: t('structure.dbTab', { name: database })
   };
   resultTabs.value = [tab];
   activeTab.value = id;
@@ -1285,7 +1331,7 @@ function openDbStructureTab(data) {
 function openTableStructureTab(data) {
   const database = data && data.database ? data.database : currentDb.value;
   const table = data && data.name ? data.name : '';
-  if (!database || !table) { ElMessage.warning('未选择表'); return; }
+  if (!database || !table) { ElMessage.warning(t('structure.needTable')); return; }
   currentDb.value = database;
   currentTable.value = table;
   const id = 'tab_' + Date.now();
@@ -1294,7 +1340,7 @@ function openTableStructureTab(data) {
     kind: 'structure-table',
     database,
     table,
-    label: `表结构：${table}`
+    label: t('structure.tableTab', { name: table })
   };
   resultTabs.value = [tab];
   activeTab.value = id;
@@ -1355,21 +1401,21 @@ function handleDropDatabase(data) {
   dropDialog.data = data;
   dropDialog.targetName = data.name;
   dropDialog.inputName = '';
-  dropDialog.title = '删除数据库确认';
-  dropDialog.message = `确认删除数据库「${data.name}」？该库内所有表和数据将全部删除，不可恢复！`;
+  dropDialog.title = t('drop.dropDbTitle');
+  dropDialog.message = t('drop.dropDbMsg', { name: data.name });
   dropDialog.visible = true;
 }
 async function doDropDatabase(data) {
   try {
     await api.dropDatabase(connection.value.id, data.name);
-    ElMessage.success(`数据库「${data.name}」已删除`);
+    ElMessage.success(t('drop.dropDbOk', { name: data.name }));
     resultTabs.value = resultTabs.value.filter((t) => t.database !== data.name);
     if (!resultTabs.value.find((t) => t.id === activeTab.value)) activeTab.value = resultTabs.value[0]?.id || '';
     if (currentDb.value === data.name) { currentDb.value = ''; currentTable.value = ''; }
     refreshTree();
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('删除失败: ' + (e.message || e));
+    ElMessage.error(t('drop.failed', { message: e.message || e }));
   }
 }
 
@@ -1377,7 +1423,7 @@ async function doDropDatabase(data) {
 async function handleDatabaseImport(data) {
   try {
     const tables = await api.listTables(connection.value.id, data.name);
-    if (!tables.length) { ElMessage.warning('该库下暂无表，请先新建表'); return; }
+    if (!tables.length) { ElMessage.warning(t('importDb.noTables')); return; }
     const tableNames = tables.map((t) => t.name);
     // 用 ElMessageBox.prompt 不便选表，这里直接打开导入对话框并传入可选表列表
     importDialog.database = data.name;
@@ -1385,7 +1431,7 @@ async function handleDatabaseImport(data) {
     importDialog.tables = tableNames;
     importDialog.visible = true;
   } catch (e) {
-    ElMessage.error('加载表列表失败: ' + (e.message || e));
+    ElMessage.error(t('importDb.loadFail', { message: e.message || e }));
   }
 }
 
@@ -1393,8 +1439,8 @@ async function handleDatabaseImport(data) {
 async function handleDatabaseExport(data) {
   try {
     const tables = await api.listTables(connection.value.id, data.name);
-    if (!tables.length) { ElMessage.warning('该库下暂无表可导出'); return; }
-    ElMessage.success(`开始导出 ${tables.length} 张表`);
+    if (!tables.length) { ElMessage.warning(t('export.noTables')); return; }
+    ElMessage.success(t('export.startN', { n: tables.length }));
     tables.forEach((t, i) => {
       setTimeout(() => {
         const url = api.exportTableUrl(connection.value.id, data.name, t.name);
@@ -1402,7 +1448,7 @@ async function handleDatabaseExport(data) {
       }, i * 400);
     });
   } catch (e) {
-    ElMessage.error('导出失败: ' + (e.message || e));
+    ElMessage.error(t('export.fail', { message: e.message || e }));
   }
 }
 
@@ -1433,21 +1479,19 @@ function handleImportSql(data) {
     if (!file) return;
     try {
       const content = decodeSqlText(await file.arrayBuffer()).trim();
-      if (!content) { ElMessage.warning('SQL 文件为空'); return; }
+      if (!content) { ElMessage.warning(t('importSql.empty')); return; }
       // 与 CSV 导入一致的三重限制 + 分批事务 + 坏语句剔除
       const res = await api.importSql(connection.value.id, database, content);
       const badCount = (res.badRows && res.badRows.length) || 0;
       if (badCount) {
-        ElMessage.warning(`SQL 文件「${file.name}」导入完成：共 ${res.total} 条语句，成功 ${res.executed} 条，剔除错误 ${badCount} 条`);
+        ElMessage.warning(t('importSql.partial', { name: file.name, total: res.total, executed: res.executed, bad: badCount }));
       } else {
-        ElMessage.success(`SQL 文件「${file.name}」导入成功，共执行 ${res.executed} 条语句`);
+        ElMessage.success(t('importSql.ok', { name: file.name, executed: res.executed }));
       }
       refreshTree();
     } catch (e) {
-      const hint = e.code === 'ECONNABORTED'
-        ? '（请求超时，后端可能仍在执行，请稍后到库里确认实际结果，避免重复导入）'
-        : '';
-      ElMessage.error('导入失败: ' + (e.message || e) + hint);
+      const hint = e.code === 'ECONNABORTED' ? t('importSql.timeout') : '';
+      ElMessage.error(t('importSql.fail', { message: (e.message || e) + hint }));
     }
   };
   input.click();
@@ -1457,44 +1501,44 @@ function handleImportSql(data) {
 async function handleRenameTable(data) {
   try {
     const res = await ElMessageBox.prompt(
-      isRedis.value ? '请输入新的 key 名称' : '请输入新表名',
-      `重命名「${data.name}」`,
+      isRedis.value ? t('rename.keyPrompt') : t('rename.tablePrompt'),
+      t('rename.title', { name: data.name }),
       {
-        confirmButtonText: '确定', cancelButtonText: '取消',
+        confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'),
         inputValue: data.name,
         inputPattern: isRedis.value ? /\S+/ : /^[A-Za-z_][A-Za-z0-9_]*$/,
-        inputErrorMessage: isRedis.value ? 'key 名称不能为空' : '表名只能以字母/下划线开头，含字母数字下划线'
+        inputErrorMessage: isRedis.value ? t('rename.keyEmpty') : t('rename.tablePattern')
       }
     );
     const newName = res.value.trim();
     if (newName === data.name) return;
     await api.renameTable(connection.value.id, data.database, data.name, newName);
-    ElMessage.success(`已重命名为 ${newName}`);
+    ElMessage.success(t('rename.ok', { name: newName }));
     // 更新可能已打开的 tab
     resultTabs.value.forEach((t) => { if (t.database === data.database && t.table === data.name) t.table = newName; });
     refreshTree();
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('重命名失败: ' + (e.message || e));
+    ElMessage.error(t('rename.fail', { message: e.message || e }));
   }
 }
 
 // 复制表
 async function handleCopyTable(data) {
   try {
-    const res = await ElMessageBox.prompt('请输入新表名', `复制「${data.name}」`, {
-      confirmButtonText: '确定', cancelButtonText: '取消',
+    const res = await ElMessageBox.prompt(t('copyTable.prompt'), t('copyTable.title', { name: data.name }), {
+      confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'),
       inputValue: data.name + '_copy',
       inputPattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-      inputErrorMessage: '表名只能以字母/下划线开头，含字母数字下划线'
+      inputErrorMessage: t('rename.tablePattern')
     });
     const dest = res.value.trim();
     await api.copyTable(connection.value.id, data.database, data.name, dest);
-    ElMessage.success(`已复制为 ${dest}`);
+    ElMessage.success(t('copyTable.ok', { name: dest }));
     refreshTree();
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('复制失败: ' + (e.message || e));
+    ElMessage.error(t('copyTable.fail', { message: e.message || e }));
   }
 }
 
@@ -1504,19 +1548,19 @@ function handleTruncateTable(data) {
   dropDialog.data = data;
   dropDialog.targetName = data.name;
   dropDialog.inputName = '';
-  dropDialog.title = isRedis.value ? '清空 key 确认' : '清空表确认';
+  dropDialog.title = isRedis.value ? t('drop.truncateKeyTitle') : t('drop.truncateTableTitle');
   dropDialog.message = isRedis.value
-    ? `确认清空 key「${data.name}」的所有内容？该操作不可恢复！`
-    : `确认清空表「${data.name}」的所有数据？该操作不可恢复！`;
+    ? t('drop.truncateKeyMsg', { name: data.name })
+    : t('drop.truncateTableMsg', { name: data.name });
   dropDialog.visible = true;
 }
 async function doTruncateTable(data) {
   try {
     await api.truncateTable(connection.value.id, data.database, data.name);
-    ElMessage.success(`表「${data.name}」已清空`);
+    ElMessage.success(t('drop.truncateOk', { name: data.name }));
     refreshTree();
   } catch (e) {
-    ElMessage.error('清空失败: ' + (e.message || e));
+    ElMessage.error(t('drop.truncateFailed', { message: e.message || e }));
   }
 }
 
@@ -1526,22 +1570,22 @@ function handleDropTable(data) {
   dropDialog.data = data;
   dropDialog.targetName = data.name;
   dropDialog.inputName = '';
-  dropDialog.title = isRedis.value ? '删除 key 确认' : '删除表确认';
+  dropDialog.title = isRedis.value ? t('drop.dropKeyTitle') : t('drop.dropTableTitle');
   dropDialog.message = isRedis.value
-    ? `确认删除 key「${data.name}」？该操作不可恢复！`
-    : `确认删除表「${data.name}」？表结构和数据将全部删除，不可恢复！`;
+    ? t('drop.dropKeyMsg', { name: data.name })
+    : t('drop.dropTableMsg', { name: data.name });
   dropDialog.visible = true;
 }
 async function doDropTable(data) {
   try {
     await api.dropTable(connection.value.id, data.database, data.name);
-    ElMessage.success(`表「${data.name}」已删除`);
+    ElMessage.success(t('drop.dropTableOk', { name: data.name }));
     resultTabs.value = resultTabs.value.filter((t) => !(t.database === data.database && t.table === data.name));
     if (!resultTabs.value.find((t) => t.id === activeTab.value)) activeTab.value = resultTabs.value[0]?.id || '';
     refreshTree();
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
-    ElMessage.error('删除失败: ' + (e.message || e));
+    ElMessage.error(t('drop.failed', { message: e.message || e }));
   }
 }
 </script>

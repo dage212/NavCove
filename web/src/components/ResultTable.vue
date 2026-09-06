@@ -6,12 +6,12 @@
       <div style="flex:1"></div>
       <template v-if="isPaginated">
         <el-input-number v-model="page" :min="1" :max="totalPages" size="small" style="width:110px" @change="goPage(page)" />
-        <span style="color:var(--c-text-3);font-size:12px">/ {{ totalPages }} 页</span>
+        <span style="color:var(--c-text-3);font-size:12px">/ {{ t('table.pages', { n: totalPages }) }}</span>
         <el-select v-model="size" size="small" style="width:100px" @change="onSizeChange">
-          <el-option :value="20" label="20 条/页" />
-          <el-option :value="50" label="50 条/页" />
-          <el-option :value="100" label="100 条/页" />
-          <el-option :value="200" label="200 条/页" />
+          <el-option :value="20" :label="t('table.perPage', { n: 20 })" />
+          <el-option :value="50" :label="t('table.perPage', { n: 50 })" />
+          <el-option :value="100" :label="t('table.perPage', { n: 100 })" />
+          <el-option :value="200" :label="t('table.perPage', { n: 200 })" />
         </el-select>
         <el-button-group size="small">
           <el-button :disabled="page <= 1" @click="goPage(1)"><el-icon><DArrowLeft /></el-icon></el-button>
@@ -28,33 +28,33 @@
         :disabled="!pkColumns.length"
         @click="startNewRow"
       >
-        <el-icon><Plus /></el-icon><span style="margin-left:4px">新增行</span>
+        <el-icon><Plus /></el-icon><span style="margin-left:4px">{{ t('table.addRow') }}</span>
       </el-button>
       <el-dropdown v-if="!isRedis" size="small" trigger="click" @command="onExport">
         <el-button size="small">
-          <el-icon><Download /></el-icon><span style="margin-left:4px">导出</span>
+          <el-icon><Download /></el-icon><span style="margin-left:4px">{{ t('table.export') }}</span>
           <el-icon style="margin-left:2px"><ArrowDown /></el-icon>
         </el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="csv"><el-icon><Download /></el-icon>导出 CSV</el-dropdown-item>
-            <el-dropdown-item command="sql"><el-icon><Connection /></el-icon>导出 SQL</el-dropdown-item>
+            <el-dropdown-item command="csv"><el-icon><Download /></el-icon>{{ t('table.exportCsv') }}</el-dropdown-item>
+            <el-dropdown-item command="sql"><el-icon><Connection /></el-icon>{{ t('table.exportSql') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
       <el-button size="small" @click="refreshData"><el-icon><Refresh /></el-icon></el-button>
       <template v-if="isRedis">
         <el-button size="small" :type="showRaw ? 'primary' : ''" plain @click="showRaw = !showRaw">
-          原始视图
+          {{ t('table.rawView') }}
         </el-button>
         <el-button size="small" @click="copyRaw" :disabled="!rawText">
-          <el-icon><CopyDocument /></el-icon><span style="margin-left:4px">复制</span>
+          <el-icon><CopyDocument /></el-icon><span style="margin-left:4px">{{ t('table.copy') }}</span>
         </el-button>
       </template>
     </div>
 
     <div v-else-if="tab.kind === 'write'" class="write-info">
-      <el-result icon="success" title="执行成功" :sub-title="`影响行数 ${tab.affected}`">
+      <el-result icon="success" :title="t('table.execOk')" :sub-title="t('table.affected', { n: tab.affected })">
         <template #extra>
           <el-descriptions :column="1" border size="small" style="margin-top:8px;max-width:360px">
             <el-descriptions-item label="affectedRows">{{ tab.writeInfo.affected }}</el-descriptions-item>
@@ -66,7 +66,7 @@
     </div>
 
     <div v-if="isRedis && showRaw" class="raw-wrap">
-      <pre class="raw-view">{{ rawText || '（空）' }}</pre>
+      <pre class="raw-view">{{ rawText || t('common.empty') }}</pre>
     </div>
     <div v-else class="table-wrap">
       <el-table
@@ -80,17 +80,6 @@
         @sort-change="onSort"
       >
         <el-table-column type="index" label="#" width="50" fixed />
-        <!-- 操作列：删除按钮（新增行/普通行均有） -->
-        <el-table-column v-if="isEditable" label="操作" width="64" fixed>
-          <template #default="{ row, $index }">
-            <template v-if="row._isNew">
-              <span class="state-tag st-new" title="新增行">新</span>
-            </template>
-            <el-button v-if="!row._isNew && pkColumns.length" text size="small" type="danger" @click="confirmDelete(row, $index)" title="删除该行">
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </template>
-        </el-table-column>
         <el-table-column
           v-for="col in columns"
           :key="col"
@@ -103,8 +92,8 @@
           <template #header>
             <div class="col-head">
               {{ col }}
-              <span v-if="!isRedis && pkColumns.includes(col)" class="pk-badge" title="主键">PK</span>
-              <span v-if="colNull(col)" class="null-mark" title="可空">?</span>
+              <span v-if="!isRedis && pkColumns.includes(col)" class="pk-badge" :title="t('table.pk')">PK</span>
+              <span v-if="colNull(col)" class="null-mark" :title="t('table.nullable')">?</span>
             </div>
           </template>
           <template #default="{ row }">
@@ -117,7 +106,6 @@
                 class="index-input"
               />
             </template>
-            <!-- 单元格编辑模式（点击后弹出输入框 + ✓/✗） -->
             <template v-else-if="isEditingCell(row, col)">
               <div class="cell-editor">
                 <el-input
@@ -129,12 +117,13 @@
                   :disabled="isPk(col) && !row._isNew && !isRedis"
                   @keyup.enter="confirmEdit"
                   @keyup.esc="cancelEdit"
+                  @blur="onEditBlur"
                 />
-                <div class="cell-actions">
-                  <el-button size="small" type="success" text @click="confirmEdit" title="确认修改">
+                <div v-if="!row._isNew" class="cell-actions">
+                  <el-button size="small" type="success" text @click="confirmEdit" :title="t('table.confirmEdit')">
                     <el-icon><Check /></el-icon>
                   </el-button>
-                  <el-button size="small" type="danger" text @click="cancelEdit" title="放弃修改">
+                  <el-button size="small" type="danger" text @click="cancelEdit" :title="t('table.cancelEdit')">
                     <el-icon><Close /></el-icon>
                   </el-button>
                 </div>
@@ -152,29 +141,37 @@
             </template>
           </template>
         </el-table-column>
-        <!-- 新增行的确认/取消：固定在右侧，避免横向滚动时被遮挡或占用字段列 -->
-        <el-table-column v-if="newRow" label="新增操作" width="140" fixed="right" class-name="col-new-actions">
-          <template #default="{ row }">
+        <el-table-column
+          v-if="isEditable"
+          :label="t('table.actions')"
+          :width="newRow ? 140 : 64"
+          fixed="right"
+          class-name="col-actions"
+        >
+          <template #default="{ row, $index }">
             <div v-if="row._isNew" class="new-row-actions">
-              <el-button size="small" type="success" :loading="newRowSubmitting" @click="confirmNewRow" title="确认新增">
-                <el-icon><Check /></el-icon><span style="margin-left:2px">确认</span>
+              <el-button size="small" type="success" :loading="newRowSubmitting" @click="confirmNewRow" :title="t('table.confirmAdd')">
+                <el-icon><Check /></el-icon><span style="margin-left:2px">{{ t('table.confirm') }}</span>
               </el-button>
-              <el-button size="small" type="danger" :disabled="newRowSubmitting" @click="cancelNewRow" title="放弃新增">
-                <el-icon><Close /></el-icon><span style="margin-left:2px">取消</span>
+              <el-button size="small" type="danger" :disabled="newRowSubmitting" @click="cancelNewRow" :title="t('table.cancelAdd')">
+                <el-icon><Close /></el-icon><span style="margin-left:2px">{{ t('common.cancel') }}</span>
               </el-button>
             </div>
+            <el-button v-else-if="pkColumns.length" text size="small" type="danger" @click="confirmDelete(row, $index)" :title="t('table.deleteRow')">
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
     <div v-if="isEditable" class="table-footer">
       <template v-if="!pkColumns.length">
-        <span style="color:#e6a23c">⚠ 该表无主键，无法进行单行编辑 / 新增 / 删除</span>
-        <span style="margin-left:auto;color:var(--c-text-3)">点击单元格可查看内容</span>
+        <span style="color:#e6a23c">{{ t('table.noPk') }}</span>
+        <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.clickView') }}</span>
       </template>
       <template v-else>
-        <span style="color:var(--c-text-3)">点击单元格即可编辑；行尾「+新增行」后在表头浮动行填入并确认</span>
-        <span style="margin-left:auto;color:var(--c-text-3)">共 <b>{{ total }}</b> 条记录{{ tab.kind === 'table' ? `，当前第 ${page} / ${totalPages} 页` : '' }}</span>
+        <span style="color:var(--c-text-3)">{{ t('table.clickEdit') }}</span>
+        <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.total', { n: total }) }}{{ tab.kind === 'table' ? t('table.pageOf', { page, pages: totalPages }) : '' }}</span>
       </template>
     </div>
   </div>
@@ -184,6 +181,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import api from '../api';
+import { t } from '../i18n';
 
 const props = defineProps({
   tab: { type: Object, required: true },
@@ -234,7 +232,7 @@ function rowsToRaw(list, type) {
 
 async function copyRaw() {
   const text = rawText.value;
-  if (!text) { ElMessage.warning('没有可复制的原始数据'); return; }
+  if (!text) { ElMessage.warning(t('table.noRaw')); return; }
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
@@ -248,9 +246,9 @@ async function copyRaw() {
       document.execCommand('copy');
       document.body.removeChild(ta);
     }
-    ElMessage.success('已复制原始数据');
+    ElMessage.success(t('table.copiedRaw'));
   } catch (e) {
-    ElMessage.error('复制失败: ' + (e.message || e));
+    ElMessage.error(t('table.copyFail', { message: e.message || e }));
   }
 }
 // 查询结果可编辑：kind=table 或 kind=query 且有 database+table
@@ -364,7 +362,7 @@ async function loadData() {
       ? String(res.raw)
       : rowsToRaw(rows.value, res.keyType || props.tab.redisType);
   } catch (e) {
-    ElMessage.error('加载数据失败: ' + e.message);
+    ElMessage.error(t('table.loadFail', { message: e.message }));
   }
 }
 
@@ -395,7 +393,7 @@ async function refreshData() {
         editingCell.value = null;
         newRow.value = null;
       }
-    } catch (e) { ElMessage.error('刷新失败: ' + e.message); }
+    } catch (e) { ElMessage.error(t('table.refreshFail', { message: e.message })); }
   }
 }
 function onSort({ prop, order }) {
@@ -483,6 +481,12 @@ function flushPendingEdit() {
   return false;
 }
 
+function onEditBlur() {
+  if (editingCell.value && editingCell.value.row && editingCell.value.row._isNew) {
+    flushPendingEdit();
+  }
+}
+
 function confirmEdit() {
   const ec = editingCell.value;
   if (!ec) return;
@@ -511,10 +515,10 @@ function confirmEdit() {
   api.updateRow(props.connId || props.tab.connId, props.tab.database, props.tab.table, pk, values)
     .then(() => {
       row[col] = normalized;
-      ElMessage.success('已更新');
+      ElMessage.success(t('table.updated'));
       editingCell.value = null;
     })
-    .catch((e) => { ElMessage.error('更新失败: ' + e.message); editingCell.value && (editingCell.value.submitting = false); });
+    .catch((e) => { ElMessage.error(t('table.updateFail', { message: e.message })); editingCell.value && (editingCell.value.submitting = false); });
 }
 
 function cancelEdit() {
@@ -525,11 +529,11 @@ function cancelEdit() {
 // --- 新增行 ---
 function startNewRow() {
   if (isRedis.value && (props.tab.redisType === 'string' || props.tab.redisType === 'stream')) {
-    ElMessage.warning('请使用左侧右键「新建 key」');
+    ElMessage.warning(t('table.useNewKey'));
     return;
   }
   if (!pkColumns.value.length) {
-    ElMessage.warning('该表无主键，不支持新增');
+    ElMessage.warning(t('table.noPkAdd'));
     return;
   }
   if (newRow.value) return;
@@ -565,13 +569,13 @@ async function confirmNewRow() {
     values.index = Number(row.index);
   }
   if (!Object.keys(values).length) {
-    ElMessage.warning('请至少填写一个字段');
+    ElMessage.warning(t('table.needField'));
     return;
   }
   newRowSubmitting.value = true;
   try {
     await api.insertRow(props.connId || props.tab.connId, props.tab.database, props.tab.table, values);
-    ElMessage.success('新增成功');
+    ElMessage.success(t('table.addOk'));
     newRow.value = null;
     editingCell.value = null;
     // 通知左侧树更新该表行数（+1）
@@ -583,7 +587,7 @@ async function confirmNewRow() {
       await loadData();
     }
   } catch (e) {
-    ElMessage.error('新增失败: ' + e.message);
+    ElMessage.error(t('table.addFail', { message: e.message }));
   } finally {
     newRowSubmitting.value = false;
   }
@@ -591,7 +595,7 @@ async function confirmNewRow() {
 
 // --- 删除行 ---
 async function confirmDelete(row, index) {
-  if (!pkColumns.value.length) { ElMessage.warning('该表无主键，无法定位删除的行'); return; }
+  if (!pkColumns.value.length) { ElMessage.warning(t('table.noPkDelete')); return; }
   if (row._isNew) {
     newRow.value = null;
     return;
@@ -600,17 +604,17 @@ async function confirmDelete(row, index) {
   pkColumns.value.forEach(c => { pk[c] = row[c]; });
   const pkShow = pkColumns.value.map(c => `${c}=${row[c]}`).join(', ');
   try {
-    await ElMessageBox.confirm(`确认删除该行？(${pkShow})`, '删除确认', {
+    await ElMessageBox.confirm(t('table.deleteConfirm', { pk: pkShow }), t('table.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
       customClass: 'row-delete-confirm',
       cancelButtonClass: 'el-button--primary'
     });
   } catch (e) { return; }
   try {
     const res = await api.deleteRow(props.connId || props.tab.connId, props.tab.database, props.tab.table, pk);
-    ElMessage.success(`删除成功 ${res.deleted} 行`);
+    ElMessage.success(t('table.deleteOk', { n: res.deleted }));
     // 通知左侧树更新该表行数（-deleted）
     if (props.tab.database && props.tab.table) {
       emit('rows-changed', { database: props.tab.database, table: props.tab.table, delta: -res.deleted });
@@ -623,7 +627,7 @@ async function confirmDelete(row, index) {
       if (idx >= 0) { rows.value.splice(idx, 1); total.value = rows.value.length; }
     }
   } catch (e) {
-    ElMessage.error('删除失败: ' + e.message);
+    ElMessage.error(t('table.deleteFail', { message: e.message }));
   }
 }
 </script>
@@ -669,12 +673,21 @@ async function confirmDelete(row, index) {
   box-shadow: 0 0 0 1px #B3D7FF inset;
 }
 
-/* 单元格编辑器（输入框 + ✓/✗） */
+/* 单元格编辑器：输入框占满列宽，✓/✗ 浮在输入框右侧，不挤占宽度 */
 .cell-editor {
-  display: flex; align-items: center; gap: 4px;
+  position: relative;
+  width: 100%;
   padding: 2px 0;
+  overflow: visible;
 }
-.cell-editor .edit-input { flex: 1; min-width: 0; }
+.cell-editor .edit-input { width: 100%; }
+:deep(.el-table td:has(.cell-editor)) {
+  overflow: visible;
+  z-index: 6;
+}
+:deep(.el-table td:has(.cell-editor) > .cell) {
+  overflow: visible;
+}
 :deep(.cell-editor .edit-input .el-input__wrapper) {
   box-shadow: 0 0 0 1px var(--c-primary) inset;
   border-radius: 2px; background: #F0F7FF;
@@ -685,9 +698,16 @@ async function confirmDelete(row, index) {
 }
 :deep(.cell-editor .edit-input .el-input__inner) { font-size: 13px; height: 28px; }
 .cell-actions {
-  display: inline-flex; align-items: center; gap: 0; flex-shrink: 0;
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 4px;
+  z-index: 8;
+  display: inline-flex; align-items: center; gap: 0;
   background: #fff; border: 1px solid var(--c-border); border-radius: 2px;
   padding: 0 2px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
 }
 .cell-actions .el-button {
   width: 22px; height: 22px; padding: 0; margin: 1px; border-radius: 2px;
@@ -710,7 +730,7 @@ async function confirmDelete(row, index) {
   justify-content: center;
 }
 .new-row-actions .el-button { padding: 0 8px; height: 26px; font-size: 12px; border-radius: 2px; }
-:deep(.col-new-actions .cell) { padding: 0 6px; }
+:deep(.col-actions .cell) { padding: 0 6px; }
 
 /* 操作列状态 tag & del button */
 .row-ops { display: flex; align-items: center; gap: 4px; }

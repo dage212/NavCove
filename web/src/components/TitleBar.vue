@@ -6,7 +6,7 @@
 
       <!-- 仅主界面显示：折叠按钮 -->
       <template v-if="loggedIn">
-        <el-button class="tb-collapse-btn" text size="small" @click.stop="onToggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
+        <el-button class="tb-collapse-btn" text size="small" @click.stop="onToggleSidebar" :title="sidebarCollapsed ? t('titlebar.expandSidebar') : t('titlebar.collapseSidebar')">
           <el-icon size="16"><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
         </el-button>
       </template>
@@ -27,13 +27,17 @@
                 <el-icon><UserFilled /></el-icon>
                 <span style="margin-left:6px">{{ user.name }} ({{ user.username }})</span>
               </el-dropdown-item>
-              <el-dropdown-item divided command="view-log">
+              <el-dropdown-item divided command="settings">
+                <el-icon><Setting /></el-icon>
+                <span style="margin-left:6px">{{ t('titlebar.settings') }}</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="view-log">
                 <el-icon><Document /></el-icon>
-                <span style="margin-left:6px">查看日志</span>
+                <span style="margin-left:6px">{{ t('titlebar.viewLog') }}</span>
               </el-dropdown-item>
               <el-dropdown-item divided command="logout">
                 <el-icon><SwitchButton /></el-icon>
-                <span style="margin-left:6px">退出登录</span>
+                <span style="margin-left:6px">{{ t('titlebar.logout') }}</span>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -42,17 +46,17 @@
 
       <!-- 窗口控制按钮（Windows/Linux 显示；macOS 用原生交通灯，不渲染） -->
       <div v-if="!isMac" class="tb-actions">
-        <button class="tb-btn tb-min" title="最小化" @click.stop="onMinimize">
+        <button class="tb-btn tb-min" :title="t('titlebar.minimize')" @click.stop="onMinimize">
           <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg>
         </button>
-        <button class="tb-btn tb-max" :title="isMax ? '还原' : '最大化'" @click.stop="onMaximize">
+        <button class="tb-btn tb-max" :title="isMax ? t('titlebar.restore') : t('titlebar.maximize')" @click.stop="onMaximize">
           <svg v-if="!isMax" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>
           <svg v-else width="10" height="10" viewBox="0 0 10 10">
             <rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/>
             <rect x="2.5" y="0.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/>
           </svg>
         </button>
-        <button class="tb-btn tb-close" title="关闭" @click.stop="onClose">
+        <button class="tb-btn tb-close" :title="t('titlebar.close')" @click.stop="onClose">
           <svg width="10" height="10" viewBox="0 0 10 10">
             <path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1.2"/>
           </svg>
@@ -64,7 +68,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Expand, Fold, ArrowDown, UserFilled, SwitchButton, Document } from '@element-plus/icons-vue';
+import { Expand, Fold, ArrowDown, UserFilled, SwitchButton, Document, Setting } from '@element-plus/icons-vue';
+import { t } from '../i18n';
 
 defineProps({
   loggedIn: { type: Boolean, default: false },
@@ -73,7 +78,7 @@ defineProps({
   userInitial: { type: String, default: '' }
 });
 
-const emit = defineEmits(['toggle-sidebar', 'open-conn', 'logout', 'view-log']);
+const emit = defineEmits(['toggle-sidebar', 'open-conn', 'logout', 'view-log', 'settings']);
 
 // 平台判断：macOS 用原生交通灯按钮，不渲染自定义窗口控制
 const isMac = computed(() => {
@@ -107,6 +112,7 @@ function onToggleSidebar() { emit('toggle-sidebar'); }
 function onUserCommand(cmd) {
   if (cmd === 'logout') emit('logout');
   else if (cmd === 'view-log') emit('view-log');
+  else if (cmd === 'settings') emit('settings');
 }
 function onMinimize() { window.navcove?.window?.minimize?.(); }
 function onMaximize() { window.navcove?.window?.maximize?.(); }

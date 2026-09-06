@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
-    title="新建数据库"
+    :title="t('createDb.title')"
     width="900px"
     :close-on-click-modal="false"
     @open="onOpen"
@@ -10,10 +10,10 @@
     destroy-on-close
   >
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-      <span style="color:#5e6c84;font-size:13px;">当前连接：</span>
-      <el-tag size="small">{{ conn && conn.name ? conn.name : '默认连接' }}</el-tag>
+      <span style="color:#5e6c84;font-size:13px;">{{ t('createDb.currentConn') }}</span>
+      <el-tag size="small">{{ conn && conn.name ? conn.name : t('createDb.defaultConn') }}</el-tag>
       <span style="color:#86909c;font-size:12px;margin-left:auto;">
-        快捷键：Ctrl + Enter / Cmd + Enter 执行
+        {{ t('createDb.shortcut') }}
       </span>
     </div>
     <div class="create-editor-wrapper">
@@ -26,16 +26,16 @@
         :class="['log-item', log.ok ? 'log-ok' : 'log-err']"
       >
         <span class="log-time">{{ log.time }}</span>
-        <span class="log-tag">{{ log.ok ? '成功' : '失败' }}</span>
+        <span class="log-tag">{{ log.ok ? t('common.success') : t('common.failed') }}</span>
         <span class="log-msg">{{ log.msg }}</span>
       </div>
     </div>
     <template #footer>
       <div class="conn-dialog-footer">
-        <el-button @click="onCancel">取消</el-button>
+        <el-button @click="onCancel">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="runExecute" :loading="executing">
           <el-icon><VideoPlay /></el-icon>
-          <span style="margin-left:4px">执行</span>
+          <span style="margin-left:4px">{{ t('editor.run') }}</span>
         </el-button>
       </div>
     </template>
@@ -55,6 +55,7 @@ import 'codemirror/addon/hint/show-hint.css';
 import 'codemirror/addon/hint/show-hint.js';
 import 'codemirror/addon/hint/sql-hint.js';
 import api from '../api';
+import { t } from '../i18n';
 
 const props = defineProps({
   visible: Boolean,
@@ -98,7 +99,7 @@ async function onOpen() {
       smartIndent: true,
       matchBrackets: true,
       autoCloseBrackets: true,
-      placeholder: '在此输入 CREATE DATABASE ...',
+      placeholder: t('createDb.placeholder'),
       extraKeys: {
         'Ctrl-Enter': () => runExecute(),
         'Cmd-Enter': () => runExecute(),
@@ -126,7 +127,7 @@ function onClosed() {
 
 function onCancel() {
   if (executing.value) {
-    ElMessage.warning('正在执行，请稍候');
+    ElMessage.warning(t('createDb.running'));
     return;
   }
   emit('update:visible', false);
@@ -142,10 +143,10 @@ function pushLog(ok, msg) {
 }
 
 async function runExecute() {
-  if (!props.conn || !props.conn.id) { ElMessage.error('未连接数据库'); return; }
+  if (!props.conn || !props.conn.id) { ElMessage.error(t('createDb.notConnected')); return; }
   if (!cmInstance) return;
   const sql = cmInstance.getValue().trim();
-  if (!sql) { ElMessage.warning('请输入 SQL 语句'); return; }
+  if (!sql) { ElMessage.warning(t('createDb.needSql')); return; }
   executing.value = true;
   try {
     // 建库语句不在特定 database 下执行，database 传空
@@ -181,11 +182,11 @@ async function runExecute() {
         pushLog(true, `执行成功：${JSON.stringify(item)}`);
       }
     });
-    ElMessage.success('执行成功');
+    ElMessage.success(t('createDb.ok'));
     emit('done', { sql, database: createdDb, results: list });
   } catch (e) {
     pushLog(false, e.message || String(e));
-    ElMessage.error('执行失败：' + (e.message || e));
+    ElMessage.error(t('createDb.fail', { message: e.message || e }));
   } finally {
     executing.value = false;
     nextTick(() => cmInstance && cmInstance.refresh());

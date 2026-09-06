@@ -2,17 +2,17 @@
   <el-dialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
-    title="数据库连接"
+    :title="t('conn.title')"
     width="460px"
     :close-on-click-modal="false"
   >
     <el-form :model="form" label-width="84px" class="conn-form">
-      <el-form-item label="连接名称">
+      <el-form-item :label="t('conn.name')">
         <div class="conn-name-row">
-          <el-input v-model="form.name" :placeholder="form.type === 'redis' ? '例如：本机 Redis' : '例如：本机 MySQL'" />
+          <el-input v-model="form.name" :placeholder="form.type === 'redis' ? t('conn.namePhRedis') : t('conn.namePhMysql')" />
           <el-select
             v-model="selectedConnId"
-            placeholder="选已存连接"
+            :placeholder="t('conn.pickSaved')"
             style="width: 132px; flex-shrink: 0"
             clearable
             @change="applySavedConn"
@@ -21,30 +21,30 @@
           </el-select>
         </div>
       </el-form-item>
-      <el-form-item label="数据库类型">
+      <el-form-item :label="t('conn.type')">
         <el-select v-model="form.type" style="width:100%">
           <el-option label="MySQL" value="mysql" />
           <el-option label="Redis" value="redis" />
         </el-select>
       </el-form-item>
-      <el-form-item label="主机">
+      <el-form-item :label="t('conn.host')">
         <el-input v-model="form.host" placeholder="127.0.0.1" />
       </el-form-item>
-      <el-form-item label="端口">
+      <el-form-item :label="t('conn.port')">
         <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width:100%" class="port-input" />
       </el-form-item>
-      <el-form-item v-if="form.type !== 'redis'" label="用户名">
+      <el-form-item v-if="form.type !== 'redis'" :label="t('conn.user')">
         <el-input v-model="form.user" placeholder="root" />
       </el-form-item>
-      <el-form-item label="密码">
-        <el-input v-model="form.password" show-password placeholder="无密码可留空" />
+      <el-form-item :label="t('conn.password')">
+        <el-input v-model="form.password" show-password :placeholder="t('conn.passwordPh')" />
       </el-form-item>
     </el-form>
     <template #footer>
       <div class="conn-dialog-footer">
-        <el-button @click="testConn" :loading="testing">测试连接</el-button>
-        <el-button @click="$emit('update:visible', false)">取消</el-button>
-        <el-button type="primary" @click="confirm" :loading="connecting">连接</el-button>
+        <el-button @click="testConn" :loading="testing">{{ t('conn.test') }}</el-button>
+        <el-button @click="$emit('update:visible', false)">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="confirm" :loading="connecting">{{ t('conn.connect') }}</el-button>
       </div>
     </template>
   </el-dialog>
@@ -54,6 +54,9 @@
 import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+import { t } from '../i18n';
+import zhCN from '../i18n/zh-CN';
+import enUS from '../i18n/en-US';
 
 const props = defineProps({
   visible: Boolean,
@@ -64,7 +67,7 @@ const emit = defineEmits(['update:visible', 'connected']);
 
 const form = reactive({
   id: '',
-  name: '本机 MySQL',
+  name: t('conn.defaultMysql'),
   type: 'mysql',
   host: '127.0.0.1',
   port: 3306,
@@ -94,7 +97,7 @@ function applySavedConn(id) {
   // 直接用已加载的连接列表数据填充，避免额外的 getConnection 请求导致不生效
   const c = savedConns.value.find((x) => x.id === id);
   if (!c) {
-    ElMessage.warning('未找到该已保存连接，请刷新后重试');
+    ElMessage.warning(t('conn.savedMissing'));
     return;
   }
   Object.assign(form, {
@@ -106,18 +109,24 @@ function applySavedConn(id) {
     user: c.user ?? form.user,
     password: ''
   });
-  ElMessage.info(`已带入「${c.name}」的连接信息，若原连接有密码请重新输入`);
+  ElMessage.info(t('conn.applied', { name: c.name }));
+}
+
+function isDefaultName(name, type) {
+  const mysql = [zhCN.conn.defaultMysql, enUS.conn.defaultMysql];
+  const redis = [zhCN.conn.defaultRedis, enUS.conn.defaultRedis];
+  return type === 'redis' ? redis.includes(name) : mysql.includes(name);
 }
 
 watch(() => form.type, (type) => {
   if (type === 'redis') {
     if (form.port === 3306) form.port = 6379;
     if (form.user === 'root') form.user = '';
-    if (form.name === '本机 MySQL') form.name = '本机 Redis';
+    if (isDefaultName(form.name, 'mysql')) form.name = t('conn.defaultRedis');
   } else {
     if (form.port === 6379) form.port = 3306;
     if (!form.user) form.user = 'root';
-    if (form.name === '本机 Redis') form.name = '本机 MySQL';
+    if (isDefaultName(form.name, 'redis')) form.name = t('conn.defaultMysql');
   }
 });
 
@@ -160,9 +169,9 @@ async function testConn() {
   try {
     const res = await api.testConnection({ ...form });
     const kind = form.type === 'redis' ? 'Redis' : 'MySQL';
-    ElMessage.success(`连接成功，${kind} 版本: ${res.version}`);
+    ElMessage.success(t('conn.testOk', { kind, version: res.version }));
   } catch (e) {
-    ElMessage.error('连接失败: ' + e.message);
+    ElMessage.error(t('conn.failed', { message: e.message }));
   } finally {
     testing.value = false;
   }
@@ -170,11 +179,11 @@ async function testConn() {
 
 async function confirm() {
   const n = (form.name || '').trim();
-  if (!n) { ElMessage.warning('请输入连接名称'); return; }
+  if (!n) { ElMessage.warning(t('conn.needName')); return; }
   // 连接名称不能重复：若已存在同名连接（且不是当前从下拉选中的那条），阻止新建
   const dup = savedConns.value.find((c) => c.name === n && c.id !== selectedConnId.value);
   if (dup) {
-    ElMessage.error(`连接名称「${n}」已存在，请从下拉选择该连接或修改名称`);
+    ElMessage.error(t('conn.nameExists', { name: n }));
     return;
   }
   connecting.value = true;
@@ -183,11 +192,11 @@ async function confirm() {
     // 新建/复用均不带已保存连接的 id，由后端生成独立连接池，避免多页签共用同一后端连接
     delete payload.id;
     const res = await api.connect(payload);
-    ElMessage.success('连接成功');
+    ElMessage.success(t('conn.ok'));
     // 以后端生成的连接 ID 为准，避免被表单里的 ID 覆盖成已存在的连接
     emit('connected', { ...form, name: n, id: res.id });
   } catch (e) {
-    ElMessage.error('连接失败: ' + e.message);
+    ElMessage.error(t('conn.failed', { message: e.message }));
   } finally {
     connecting.value = false;
   }

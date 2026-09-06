@@ -4,83 +4,83 @@
       <!-- 头部元信息 -->
       <div class="sv-meta">
         <template v-if="tab.kind === 'structure-db'">
-          <el-tag type="primary" size="small">数据库结构</el-tag>
+          <el-tag type="primary" size="small">{{ t('structure.dbTag') }}</el-tag>
           <span class="sv-title">{{ info.database }}</span>
-          <span v-if="info.charset" class="sv-meta-item">字符集：<b>{{ info.charset }}</b></span>
-          <span v-if="info.collation" class="sv-meta-item">排序规则：<b>{{ info.collation }}</b></span>
-          <span v-if="info.tables" class="sv-meta-item">表数量：<b>{{ info.tables.length }}</b></span>
+          <span v-if="info.charset" class="sv-meta-item">{{ t('structure.charset') }}<b>{{ info.charset }}</b></span>
+          <span v-if="info.collation" class="sv-meta-item">{{ t('structure.collation') }}<b>{{ info.collation }}</b></span>
+          <span v-if="info.tables" class="sv-meta-item">{{ t('structure.tableCount') }}<b>{{ info.tables.length }}</b></span>
         </template>
         <template v-else>
-          <el-tag type="success" size="small">表结构</el-tag>
+          <el-tag type="success" size="small">{{ t('structure.tableTag') }}</el-tag>
           <span class="sv-title">{{ info.database }}.{{ info.table }}</span>
-          <span v-if="info.columns" class="sv-meta-item">列数：<b>{{ info.columns.length }}</b></span>
-          <span v-if="info.indexes" class="sv-meta-item">索引：<b>{{ indexGroups.length }}</b> 个</span>
+          <span v-if="info.columns" class="sv-meta-item">{{ t('structure.colCount') }}<b>{{ info.columns.length }}</b></span>
+          <span v-if="info.indexes" class="sv-meta-item">{{ t('structure.indexCount') }}<b>{{ indexGroups.length }}</b>{{ t('structure.indexUnit') }}</span>
         </template>
         <div style="flex:1"></div>
-        <el-button size="small" @click="refresh"><el-icon><Refresh /></el-icon><span style="margin-left:4px">刷新</span></el-button>
+        <el-button size="small" @click="refresh"><el-icon><Refresh /></el-icon><span style="margin-left:4px">{{ t('common.refresh') }}</span></el-button>
       </div>
 
       <!-- SQL 视图 -->
       <div class="sv-section">
         <div class="sv-sec-title">
-          <el-icon><Document /></el-icon><span>SQL 定义</span>
-          <el-button size="small" text @click="copyCreateSql"><el-icon><CopyDocument /></el-icon><span style="margin-left:2px">复制</span></el-button>
+          <el-icon><Document /></el-icon><span>{{ t('structure.sqlDef') }}</span>
+          <el-button size="small" text @click="copyCreateSql"><el-icon><CopyDocument /></el-icon><span style="margin-left:2px">{{ t('common.copy') }}</span></el-button>
         </div>
         <textarea ref="sqlRef" class="sv-sql-textarea" />
       </div>
 
       <!-- 库结构：表列表 -->
       <div v-if="tab.kind === 'structure-db'" class="sv-section">
-        <div class="sv-sec-title"><el-icon><Coin /></el-icon><span>表列表</span></div>
+        <div class="sv-sec-title"><el-icon><Coin /></el-icon><span>{{ t('structure.tableList') }}</span></div>
         <el-table :data="info.tables || []" size="small" border stripe height="260">
-          <el-table-column prop="name" label="表名" min-width="180" />
-          <el-table-column prop="type" label="类型" width="100" />
-          <el-table-column prop="engine" label="引擎" width="100" />
-          <el-table-column prop="collation" label="排序规则" width="180" />
-          <el-table-column prop="createOptions" label="选项" width="180" show-overflow-tooltip />
-          <el-table-column prop="comment" label="注释" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="name" :label="t('structure.tableName')" min-width="180" />
+          <el-table-column prop="type" :label="t('structure.type')" width="100" />
+          <el-table-column prop="engine" :label="t('structure.engine')" width="100" />
+          <el-table-column prop="collation" :label="t('structure.collation')" width="180" />
+          <el-table-column prop="createOptions" :label="t('structure.options')" width="180" show-overflow-tooltip />
+          <el-table-column prop="comment" :label="t('structure.comment')" min-width="160" show-overflow-tooltip />
         </el-table>
       </div>
 
       <!-- 表结构：列信息 -->
       <div v-else class="sv-section">
-        <div class="sv-sec-title"><el-icon><Menu /></el-icon><span>列定义</span></div>
+        <div class="sv-sec-title"><el-icon><Menu /></el-icon><span>{{ t('structure.columns') }}</span></div>
         <el-table :data="info.columns || []" size="small" border stripe height="280">
-          <el-table-column prop="Field" label="字段" width="160" />
-          <el-table-column prop="Type" label="类型" width="200" />
-          <el-table-column label="可空" width="70" align="center">
+          <el-table-column prop="Field" :label="t('structure.field')" width="160" />
+          <el-table-column prop="Type" :label="t('structure.type')" width="200" />
+          <el-table-column :label="t('structure.nullable')" width="70" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.Null === 'YES'" size="small" type="info">YES</el-tag>
               <el-tag v-else size="small">NO</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="Key" label="键" width="80" />
-          <el-table-column prop="Default" label="默认值" width="160" show-overflow-tooltip />
-          <el-table-column prop="Extra" label="额外" width="140" />
-          <el-table-column prop="Comment" label="注释" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="Key" :label="t('structure.key')" width="80" />
+          <el-table-column prop="Default" :label="t('structure.default')" width="160" show-overflow-tooltip />
+          <el-table-column prop="Extra" :label="t('structure.extra')" width="140" />
+          <el-table-column prop="Comment" :label="t('structure.comment')" min-width="180" show-overflow-tooltip />
         </el-table>
       </div>
 
       <!-- 表结构：索引信息 -->
       <div v-if="tab.kind === 'structure-table'" class="sv-section">
-        <div class="sv-sec-title"><el-icon><Connection /></el-icon><span>索引</span></div>
+        <div class="sv-sec-title"><el-icon><Connection /></el-icon><span>{{ t('structure.indexes') }}</span></div>
         <el-table :data="indexGroups" size="small" border stripe height="220">
-          <el-table-column prop="name" label="索引名" width="200" />
-          <el-table-column label="唯一" width="80" align="center">
+          <el-table-column prop="name" :label="t('structure.indexName')" width="200" />
+          <el-table-column :label="t('structure.unique')" width="80" align="center">
             <template #default="{ row }">
-              <el-tag v-if="row.nonUnique == 0" size="small" type="success">是</el-tag>
-              <el-tag v-else size="small">否</el-tag>
+              <el-tag v-if="row.nonUnique == 0" size="small" type="success">{{ t('common.yes') }}</el-tag>
+              <el-tag v-else size="small">{{ t('common.no') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="indexType" label="类型" width="100" />
-          <el-table-column label="列" min-width="240">
+          <el-table-column prop="indexType" :label="t('structure.type')" width="100" />
+          <el-table-column :label="t('structure.cols')" min-width="240">
             <template #default="{ row }">
               <span v-for="(c, i) in row.columns" :key="i">
                 <el-tag size="small" type="info" style="margin-right:4px;">{{ c.name }}</el-tag>
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="comment" label="注释" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="comment" :label="t('structure.comment')" min-width="140" show-overflow-tooltip />
         </el-table>
       </div>
     </div>
@@ -96,6 +96,7 @@ import 'codemirror/lib/codemirror.css';
 import 'codemirror/mode/sql/sql.js';
 import 'codemirror/addon/edit/matchbrackets.js';
 import api from '../api';
+import { t } from '../i18n';
 
 const props = defineProps({
   tab: Object,
@@ -159,7 +160,7 @@ async function load() {
     initCm();
     if (cmInstance) cmInstance.setValue(info.createSql || '');
   } catch (e) {
-    ElMessage.error('加载结构失败：' + (e.message || e));
+    ElMessage.error(t('structure.loadFail', { message: e.message || e }));
   } finally {
     loading.value = false;
   }
@@ -190,16 +191,16 @@ async function refresh() {
 
 function copyCreateSql() {
   const text = info.createSql || '';
-  if (!text) { ElMessage.warning('无内容'); return; }
+  if (!text) { ElMessage.warning(t('structure.noContent')); return; }
   const ta = document.createElement('textarea');
   ta.value = text;
   document.body.appendChild(ta);
   ta.select();
   try {
     document.execCommand('copy');
-    ElMessage.success('已复制到剪贴板');
+    ElMessage.success(t('structure.copied'));
   } catch {
-    ElMessage.error('复制失败');
+    ElMessage.error(t('structure.copyFail'));
   }
   document.body.removeChild(ta);
 }

@@ -2,16 +2,16 @@
   <el-dialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
-    title="导入 CSV（切片上传 + 断点续传）"
+    :title="t('import.title')"
     width="620px"
     :close-on-click-modal="false"
     :before-close="onBeforeClose"
   >
     <div style="margin-bottom:12px;color:#5e6c84;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span>目标库：<el-tag size="small">{{ database }}</el-tag></span>
-      <span>目标表：
+      <span>{{ t('import.targetDb') }}<el-tag size="small">{{ database }}</el-tag></span>
+      <span>{{ t('import.targetTable') }}
         <el-tag v-if="table && !tables.length" size="small">{{ table }}</el-tag>
-        <el-select v-else v-model="selectedTable" size="small" placeholder="请选择表" style="width:160px">
+        <el-select v-else v-model="selectedTable" size="small" :placeholder="t('import.pickTable')" style="width:160px">
           <el-option v-for="t in tables" :key="t" :label="t" :value="t" />
         </el-select>
       </span>
@@ -27,10 +27,10 @@
         :on-change="onFileChange"
       >
         <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-        <div class="el-upload__text">将 CSV 文件拖到此处，或<em>点击选择</em></div>
+        <div class="el-upload__text">{{ t('import.dropHint') }}<em>{{ t('import.clickSelect') }}</em></div>
         <template #tip>
           <div class="el-upload__tip">
-            仅支持 .csv 文件，首行作为列名（需与表字段对应）。大文件自动切片上传（{{ humanSize(CHUNK_SIZE) }} / 片），支持断点续传。
+            {{ t('import.tip', { size: humanSize(CHUNK_SIZE) }) }}
           </div>
         </template>
       </el-upload>
@@ -44,14 +44,14 @@
           {{ file.name }}
         </span>
         <span style="color:#86909c;font-size:12px;">{{ humanSize(file.size) }}</span>
-        <el-button text size="small" @click="resetFile" :disabled="uploading || merging">移除</el-button>
+        <el-button text size="small" @click="resetFile" :disabled="uploading || merging">{{ t('import.remove') }}</el-button>
       </div>
 
       <!-- 切片进度 -->
       <div style="margin-bottom:8px;">
         <div style="font-size:12px;color:#86909c;display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span>切片上传进度（断点续传）</span>
-          <span>{{ chunkDone }} / {{ totalChunks }} 片 &nbsp;|&nbsp; {{ percent }}%</span>
+          <span>{{ t('import.chunkProgress') }}</span>
+          <span>{{ t('import.chunks', { done: chunkDone, total: totalChunks }) }} &nbsp;|&nbsp; {{ percent }}%</span>
         </div>
         <el-progress
           :percentage="percent"
@@ -64,24 +64,24 @@
       <div style="margin-bottom:8px;" v-if="merging">
         <div style="font-size:12px;color:#86909c;display:flex;justify-content:space-between;margin-bottom:4px;">
           <span>{{ mergingPhase }}</span>
-          <span>处理中...</span>
+          <span>{{ t('import.processing') }}</span>
         </div>
         <el-progress :percentage="99" :status="'warning'" :indeterminate="true" :stroke-width="8" />
       </div>
 
       <div v-if="lastError" style="color:#f53f3f;font-size:12px;margin-bottom:8px;">
-        错误：{{ lastError }}
+        {{ t('import.error', { message: lastError }) }}
       </div>
     </div>
 
     <el-form style="margin-top:14px" label-width="100px">
-      <el-form-item label="导入方式">
+      <el-form-item :label="t('import.mode')">
         <el-radio-group v-model="mode">
-          <el-radio value="insert">INSERT 追加</el-radio>
-          <el-radio value="replace">REPLACE 覆盖</el-radio>
+          <el-radio value="insert">{{ t('import.insert') }}</el-radio>
+          <el-radio value="replace">{{ t('import.replace') }}</el-radio>
         </el-radio-group>
       </el-form-item>
-      <el-form-item label="并发切片">
+      <el-form-item :label="t('import.concurrency')">
         <el-slider
           v-model="concurrency"
           :min="1"
@@ -90,22 +90,22 @@
           :show-stops="true"
           style="max-width:260px;display:inline-block;"
         />
-        <span style="color:#86909c;margin-left:12px;font-size:12px;">同时上传 {{ concurrency }} 个切片</span>
+        <span style="color:#86909c;margin-left:12px;font-size:12px;">{{ t('import.concurrencyHint', { n: concurrency }) }}</span>
       </el-form-item>
-      <el-form-item label="断点续传">
-        <el-tooltip content="关闭后会重新申请 uploadId，忽略已上传的切片">
+      <el-form-item :label="t('import.resume')">
+        <el-tooltip :content="t('import.resumeTip')">
           <el-switch v-model="resumeEnabled" />
         </el-tooltip>
         <div style="color:#86909c;font-size:12px;margin-top:4px;">
-          <span v-if="uploadId">当前 uploadId：<code>{{ uploadId }}</code></span>
-          <span v-else>选择文件后自动生成上传任务</span>
+          <span v-if="uploadId">{{ t('import.uploadId') }}<code>{{ uploadId }}</code></span>
+          <span v-else>{{ t('import.autoTask') }}</span>
         </div>
       </el-form-item>
     </el-form>
 
     <template #footer>
       <div class="conn-dialog-footer">
-        <el-button @click="$emit('update:visible', false)" :disabled="uploading || merging">取消</el-button>
+        <el-button @click="$emit('update:visible', false)" :disabled="uploading || merging">{{ t('common.cancel') }}</el-button>
         <el-button
           v-if="file"
           @click="startOrResumeUpload"
@@ -113,7 +113,7 @@
           :disabled="!targetTable || merging"
           type="primary"
         >
-          {{ chunkDone > 0 && chunkDone < totalChunks ? '继续上传' : '开始导入' }}
+          {{ chunkDone > 0 && chunkDone < totalChunks ? t('import.continue') : t('import.start') }}
         </el-button>
       </div>
     </template>
@@ -124,6 +124,7 @@
 import { ref, watch, computed, onBeforeUnmount } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import api from '../api';
+import { t } from '../i18n';
 
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB 一片
 
@@ -185,7 +186,7 @@ function onFileChange(f) {
   const raw = f.raw;
   if (!raw) return;
   if (!/\.csv$/i.test(raw.name)) {
-    ElMessage.warning('仅支持 .csv 文件');
+    ElMessage.warning(t('import.csvOnly'));
     return;
   }
   file.value = raw;
@@ -207,13 +208,13 @@ function resetFile(silent) {
   lastError.value = '';
   uploading.value = false;
   merging.value = false;
-  if (!silent) ElMessage.info('已移除文件');
+  if (!silent) ElMessage.info(t('import.removed'));
 }
 
 async function onBeforeClose() {
   if (uploading.value || merging.value) {
     try {
-      await ElMessageBox.confirm('上传/导入进行中，关闭将中断任务，确认？', '提示', { type: 'warning' });
+      await ElMessageBox.confirm(t('import.closeConfirm'), t('common.tip'), { type: 'warning' });
     } catch (e) {
       return false;
     }
@@ -227,9 +228,9 @@ async function onBeforeClose() {
 
 // --- 切片上传主流程（断点续传 + 并发控制 + 失败重试）---
 async function startOrResumeUpload() {
-  if (!targetTable.value) { ElMessage.warning('请选择目标表'); return; }
-  if (!file.value) { ElMessage.warning('请先选择 CSV 文件'); return; }
-  if (!props.conn || !props.conn.id) { ElMessage.error('未连接数据库'); return; }
+  if (!targetTable.value) { ElMessage.warning(t('import.needTable')); return; }
+  if (!file.value) { ElMessage.warning(t('import.needFile')); return; }
+  if (!props.conn || !props.conn.id) { ElMessage.error(t('import.notConnected')); return; }
 
   lastError.value = '';
   aborted = false;
@@ -247,7 +248,7 @@ async function startOrResumeUpload() {
     totalChunks.value = initData.totalChunks;
 
     if (initData.imported) {
-      ElMessage.success('该文件已成功导入，无需重复上传');
+      ElMessage.success(t('import.alreadyDone'));
       emit('done', { imported: initData.imported || null, database: props.database, table: targetTable.value });
       emit('update:visible', false);
       return;
@@ -280,7 +281,7 @@ async function startOrResumeUpload() {
           chunkDone.value = doneSet.value.size;
         } catch (e) {
           failFast = true;
-          lastError.value = `切片 ${index} 上传失败：${e.message || e}`;
+          lastError.value = t('import.chunkFail', { index, message: e.message || e });
           throw e;
         }
       }
@@ -296,7 +297,7 @@ async function startOrResumeUpload() {
     uploading.value = false;
     merging.value = false;
     lastError.value = lastError.value || (e.message || String(e));
-    ElMessage.error('导入失败：' + (lastError.value));
+    ElMessage.error(t('import.fail', { message: lastError.value }));
   }
 }
 
@@ -322,7 +323,7 @@ async function uploadOneChunk(index, retryLeft) {
 
 async function doMerge() {
   merging.value = true;
-  mergingPhase.value = '合并切片并导入数据库...';
+  mergingPhase.value = t('import.merging');
   try {
     const merged = await api.importMerge({
       uploadId: uploadId.value,
@@ -337,8 +338,8 @@ async function doMerge() {
     const skipped = (imported.badRows && imported.badRows.length) || 0;
     ElMessage.success(
       skipped
-        ? `导入完成，共 ${imported.count} 行，影响 ${imported.inserted} 行，剔除错误行 ${skipped} 行`
-        : `导入完成，共 ${imported.count} 行，影响 ${imported.inserted} 行`
+        ? t('import.doneSkipped', { count: imported.count, inserted: imported.inserted, skipped })
+        : t('import.done', { count: imported.count, inserted: imported.inserted })
     );
     emit('done', { imported, database: props.database, table: targetTable.value });
     emit('update:visible', false);
@@ -346,7 +347,7 @@ async function doMerge() {
   } catch (e) {
     merging.value = false;
     lastError.value = e.message || String(e);
-    ElMessage.error('导入失败：' + lastError.value + '（已上传的数据已保留，可直接点「开始导入」重试；若上次已有部分数据写入目标表，请先清空表或改用 REPLACE 模式）');
+    ElMessage.error(t('import.failKeep', { message: lastError.value }));
   }
 }
 </script>
