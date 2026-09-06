@@ -18,6 +18,13 @@ export default {
     language: 'Language',
     languageHint: 'Applies immediately and will be remembered.'
   },
+  update: {
+    title: 'Update available',
+    message: 'Current version {current}, latest version {latest}. Install the update now?',
+    downloading: 'Downloading update…',
+    downloadingPct: 'Downloading update… {n}%',
+    fail: 'Update failed: {message}'
+  },
   titlebar: {
     expandSidebar: 'Expand sidebar',
     collapseSidebar: 'Collapse sidebar',

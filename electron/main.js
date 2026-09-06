@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { fork } = require('child_process');
 const http = require('http');
+const updater = require('./updater');
 
 function bootLog(msg) {
   try {
@@ -197,6 +198,26 @@ function killServer(signal) {
   try { serverProcess.kill(signal); } catch (e) {}
   serverProcess = null;
 }
+
+ipcMain.handle('updater:check', async () => {
+  try {
+    return await updater.check(app.getVersion());
+  } catch (e) {
+    return { available: false, error: e.message || String(e) };
+  }
+});
+
+ipcMain.handle('updater:install', async () => {
+  const result = await updater.install({
+    onProgress: (percent) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater:progress', percent);
+      }
+    }
+  });
+  if (result && result.quit) setTimeout(() => app.quit(), 400);
+  return result;
+});
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);

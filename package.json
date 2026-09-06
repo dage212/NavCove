@@ -1,6 +1,6 @@
 {
   "name": "navcove",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "NavCove - 数据库管理工具（Electron 桌面版）",
   "main": "electron/main.js",
   "author": "NavCove",

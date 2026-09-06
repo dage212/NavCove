@@ -400,7 +400,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, watch } from 'vue';
+import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import CodeMirror from 'codemirror';
 import 'codemirror/lib/codemirror.css';
@@ -424,6 +424,11 @@ import SettingsDialog from './components/SettingsDialog.vue';
 import { t, elLocale, locale } from './i18n';
 import zhCN from './i18n/zh-CN';
 import enUS from './i18n/en-US';
+import { checkAppUpdate } from './updateCheck';
+
+onMounted(() => {
+  checkAppUpdate();
+});
 
 const settingsVisible = ref(false);
 

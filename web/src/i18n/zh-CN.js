@@ -18,6 +18,13 @@ export default {
     language: '语种',
     languageHint: '切换后立即生效，并会记住你的选择。'
   },
+  update: {
+    title: '发现新版本',
+    message: '当前版本 {current}，最新版本 {latest}。是否立即安装更新？',
+    downloading: '正在下载更新…',
+    downloadingPct: '正在下载更新… {n}%',
+    fail: '更新失败：{message}'
+  },
   titlebar: {
     expandSidebar: '展开侧栏',
     collapseSidebar: '收起侧栏',

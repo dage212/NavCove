@@ -8,6 +8,15 @@ contextBridge.exposeInMainWorld('navcove', {
     electron: process.versions.electron,
     node: process.versions.node
   },
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onProgress: (cb) => {
+      const handler = (_, percent) => cb(percent);
+      ipcRenderer.on('updater:progress', handler);
+      return () => ipcRenderer.removeListener('updater:progress', handler);
+    }
+  },
   window: {
     minimize: () => ipcRenderer.send('win-minimize'),
     maximize: () => ipcRenderer.send('win-maximize'),
