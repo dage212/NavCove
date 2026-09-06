@@ -38,6 +38,7 @@
     "@koa/router": "^13.1.0",
     "better-sqlite3": "11.10.0",
     "fast-csv": "^5.0.2",
+    "ioredis": "^5.11.1",
     "koa": "^2.15.3",
     "koa-bodyparser": "^4.4.1",
     "koa-compose": "^4.1.0",

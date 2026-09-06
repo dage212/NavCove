@@ -9,7 +9,7 @@
     <el-form :model="form" label-width="84px" class="conn-form">
       <el-form-item label="连接名称">
         <div class="conn-name-row">
-          <el-input v-model="form.name" placeholder="例如：本机 MySQL" />
+          <el-input v-model="form.name" :placeholder="form.type === 'redis' ? '例如：本机 Redis' : '例如：本机 MySQL'" />
           <el-select
             v-model="selectedConnId"
             placeholder="选已存连接"
@@ -24,6 +24,7 @@
       <el-form-item label="数据库类型">
         <el-select v-model="form.type" style="width:100%">
           <el-option label="MySQL" value="mysql" />
+          <el-option label="Redis" value="redis" />
         </el-select>
       </el-form-item>
       <el-form-item label="主机">
@@ -32,7 +33,7 @@
       <el-form-item label="端口">
         <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width:100%" class="port-input" />
       </el-form-item>
-      <el-form-item label="用户名">
+      <el-form-item v-if="form.type !== 'redis'" label="用户名">
         <el-input v-model="form.user" placeholder="root" />
       </el-form-item>
       <el-form-item label="密码">
@@ -108,6 +109,18 @@ function applySavedConn(id) {
   ElMessage.info(`已带入「${c.name}」的连接信息，若原连接有密码请重新输入`);
 }
 
+watch(() => form.type, (type) => {
+  if (type === 'redis') {
+    if (form.port === 3306) form.port = 6379;
+    if (form.user === 'root') form.user = '';
+    if (form.name === '本机 MySQL') form.name = '本机 Redis';
+  } else {
+    if (form.port === 6379) form.port = 3306;
+    if (!form.user) form.user = 'root';
+    if (form.name === '本机 Redis') form.name = '本机 MySQL';
+  }
+});
+
 watch(() => props.visible, async (v) => {
   if (v) {
     const saved = await loadSavedConns();
@@ -136,6 +149,9 @@ watch(() => props.visible, async (v) => {
       // 同样忽略已保存连接的 ID，保证每次连接都新建独立的连接池
       if (def) Object.assign(form, { password: '', ...def, id: '' });
     } catch (e) {}
+    // 默认回显的是最近一条已存连接时，同步选中下拉，避免点「连接」被当成新建重名
+    const matched = saved.find((c) => c.name === (form.name || '').trim());
+    selectedConnId.value = matched ? matched.id : '';
   }
 });
 
@@ -143,7 +159,8 @@ async function testConn() {
   testing.value = true;
   try {
     const res = await api.testConnection({ ...form });
-    ElMessage.success(`连接成功，MySQL 版本: ${res.version}`);
+    const kind = form.type === 'redis' ? 'Redis' : 'MySQL';
+    ElMessage.success(`连接成功，${kind} 版本: ${res.version}`);
   } catch (e) {
     ElMessage.error('连接失败: ' + e.message);
   } finally {

@@ -20,10 +20,17 @@
           <el-button :disabled="page >= totalPages" @click="goPage(totalPages)"><el-icon><DArrowRight /></el-icon></el-button>
         </el-button-group>
       </template>
-      <el-button size="small" type="success" plain :disabled="!pkColumns.length" @click="startNewRow">
+      <el-button
+        v-if="!isRedis || (tab.redisType !== 'string' && tab.redisType !== 'stream')"
+        size="small"
+        type="success"
+        plain
+        :disabled="!pkColumns.length"
+        @click="startNewRow"
+      >
         <el-icon><Plus /></el-icon><span style="margin-left:4px">新增行</span>
       </el-button>
-      <el-dropdown size="small" trigger="click" @command="onExport">
+      <el-dropdown v-if="!isRedis" size="small" trigger="click" @command="onExport">
         <el-button size="small">
           <el-icon><Download /></el-icon><span style="margin-left:4px">导出</span>
           <el-icon style="margin-left:2px"><ArrowDown /></el-icon>
@@ -36,6 +43,14 @@
         </template>
       </el-dropdown>
       <el-button size="small" @click="refreshData"><el-icon><Refresh /></el-icon></el-button>
+      <template v-if="isRedis">
+        <el-button size="small" :type="showRaw ? 'primary' : ''" plain @click="showRaw = !showRaw">
+          原始视图
+        </el-button>
+        <el-button size="small" @click="copyRaw" :disabled="!rawText">
+          <el-icon><CopyDocument /></el-icon><span style="margin-left:4px">复制</span>
+        </el-button>
+      </template>
     </div>
 
     <div v-else-if="tab.kind === 'write'" class="write-info">
@@ -50,7 +65,10 @@
       </el-result>
     </div>
 
-    <div class="table-wrap">
+    <div v-if="isRedis && showRaw" class="raw-wrap">
+      <pre class="raw-view">{{ rawText || '（空）' }}</pre>
+    </div>
+    <div v-else class="table-wrap">
       <el-table
         :data="displayRows"
         border
@@ -85,21 +103,30 @@
           <template #header>
             <div class="col-head">
               {{ col }}
-              <span v-if="pkColumns.includes(col)" class="pk-badge" title="主键">PK</span>
+              <span v-if="!isRedis && pkColumns.includes(col)" class="pk-badge" title="主键">PK</span>
               <span v-if="colNull(col)" class="null-mark" title="可空">?</span>
             </div>
           </template>
           <template #default="{ row }">
+            <template v-if="isListIndexCell(row, col)">
+              <el-input-number
+                v-model="row.index"
+                size="small"
+                controls-position="right"
+                :min="0"
+                class="index-input"
+              />
+            </template>
             <!-- 单元格编辑模式（点击后弹出输入框 + ✓/✗） -->
-            <template v-if="isEditingCell(row, col)">
+            <template v-else-if="isEditingCell(row, col)">
               <div class="cell-editor">
                 <el-input
                   ref="cellInputRef"
-                  v-model="editingCell.value"
+                  v-model="editDraft"
                   :placeholder="(row[col] == null) ? '(NULL)' : ''"
                   size="small"
                   class="edit-input"
-                  :disabled="isPk(col) && !row._isNew"
+                  :disabled="isPk(col) && !row._isNew && !isRedis"
                   @keyup.enter="confirmEdit"
                   @keyup.esc="cancelEdit"
                 />
@@ -187,12 +214,52 @@ const sort = ref({});
 const columnMeta = ref([]);
 const pkColumns = ref([]);
 
+const isRedis = computed(() => props.tab.engine === 'redis');
+const showRaw = ref(false);
+const rawText = ref('');
+
+function rowsToRaw(list, type) {
+  if (!list || !list.length) return '';
+  if (type === 'string') return list[0].value == null ? '' : String(list[0].value);
+  if (type === 'hash') {
+    const o = {};
+    list.forEach((r) => { o[r.field] = r.value; });
+    return JSON.stringify(o, null, 2);
+  }
+  if (type === 'list') return JSON.stringify(list.map((r) => r.value), null, 2);
+  if (type === 'set') return JSON.stringify(list.map((r) => r.value), null, 2);
+  if (type === 'zset') return JSON.stringify(list.map((r) => ({ member: r.member, score: r.score })), null, 2);
+  return JSON.stringify(list, null, 2);
+}
+
+async function copyRaw() {
+  const text = rawText.value;
+  if (!text) { ElMessage.warning('没有可复制的原始数据'); return; }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    ElMessage.success('已复制原始数据');
+  } catch (e) {
+    ElMessage.error('复制失败: ' + (e.message || e));
+  }
+}
 // 查询结果可编辑：kind=table 或 kind=query 且有 database+table
 const isEditable = computed(() => !!(props.tab.database && props.tab.table && (props.tab.kind === 'table' || props.tab.kind === 'query')));
 
 // --- 单元格编辑状态 ---
-// 当有值时：{ row, col, value }
+// 当有值时：{ row, col, originalValue }；输入内容单独放 editDraft，避免和 hash 的 value 列 / ref.value 撞名
 const editingCell = ref(null);
+const editDraft = ref('');
 const cellInputRef = ref(null);
 
 // --- 新增行状态 ---
@@ -249,14 +316,35 @@ watch(() => props.tab.refreshAt, () => {
   }
 });
 
+function fallbackColumns() {
+  if (columnMeta.value.length) return columnMeta.value.map((c) => c.Field);
+  if (columns.value.length) return columns.value;
+  if (isRedis.value) {
+    const t = props.tab.redisType;
+    if (t === 'list') return ['type', 'index', 'value'];
+    if (t === 'set') return ['type', 'value'];
+    if (t === 'zset') return ['type', 'member', 'score'];
+    return ['type', 'field', 'value'];
+  }
+  return [];
+}
+
 async function loadColumnMeta() {
   try {
     const cols = await api.tableColumns(props.connId || props.tab.connId, props.tab.database, props.tab.table);
-    columnMeta.value = cols;
-    pkColumns.value = cols.filter(c => c.Key === 'PRI').map(c => c.Field);
-    if (columns.value.length === 0) columns.value = cols.map(c => c.Field);
+    if (cols && cols.length) {
+      columnMeta.value = cols;
+      pkColumns.value = cols.filter((c) => c.Key === 'PRI').map((c) => c.Field);
+      if (columns.value.length === 0) columns.value = cols.map((c) => c.Field);
+    } else if (!columnMeta.value.length && isRedis.value) {
+      const fields = fallbackColumns();
+      columnMeta.value = fields.map((f) => ({ Field: f, Key: f === 'field' || f === 'index' || f === 'member' || (f === 'value' && props.tab.redisType === 'set') ? 'PRI' : '' }));
+      pkColumns.value = columnMeta.value.filter((c) => c.Key === 'PRI').map((c) => c.Field);
+      if (!columns.value.length) columns.value = fields;
+    }
   } catch (e) {
     // 容错：列结构拉不到时用已有数据的 keys 作 columns，pkColumns 留空
+    if (!columns.value.length) columns.value = fallbackColumns();
   }
 }
 
@@ -269,9 +357,12 @@ async function loadData() {
       orderColumn: sort.value.column,
       orderDir: sort.value.dir
     });
-    rows.value = res.rows;
-    columns.value = res.rows.length ? Object.keys(res.rows[0]) : (columns.value.length ? columns.value : columnMeta.value.map(c => c.Field));
-    total.value = res.total;
+    rows.value = res.rows || [];
+    columns.value = rows.value.length ? Object.keys(rows.value[0]) : fallbackColumns();
+    total.value = res.total || 0;
+    rawText.value = res.raw != null && res.raw !== ''
+      ? String(res.raw)
+      : rowsToRaw(rows.value, res.keyType || props.tab.redisType);
   } catch (e) {
     ElMessage.error('加载数据失败: ' + e.message);
   }
@@ -314,7 +405,12 @@ function onSort({ prop, order }) {
   loadData();
 }
 
+function isListIndexCell(row, col) {
+  return !!(row && row._isNew && isRedis.value && props.tab.redisType === 'list' && col === 'index');
+}
+
 function colWidth(col) {
+  if (isListIndexCell(newRow.value, col)) return 120;
   const samples = [...rows.value, newRow.value].filter(Boolean);
   const base = Math.max(...samples.map((r) => String(r[col] == null ? '' : r[col]).length), col.length);
   return Math.max(base * 9 + 24, 90);
@@ -333,6 +429,12 @@ function colNull(col) {
 // --- 单元格点击 & 编辑 ---
 function canEdit(row, col) {
   if (!isEditable.value) return false;
+  if (col === 'type' || col === 'index') return false;
+  if (isRedis.value) {
+    if (props.tab.redisType === 'stream') return false;
+    if (props.tab.redisType === 'string' && col === 'field') return false;
+    return true;
+  }
   if (!pkColumns.value.length) return false;
   if (row._isNew) return true;
   // 主键也允许查看但不允许修改
@@ -351,12 +453,15 @@ function onCellClick(row, col) {
   if (!canEdit(row, col)) return;
   // 如果点的是正在编辑的同一个单元格，不重置
   if (isEditingCell(row, col)) return;
+  if (editingCell.value && editingCell.value.row && editingCell.value.row._isNew) {
+    flushPendingEdit();
+  }
   editingCell.value = {
     row,
     col,
-    value: row[col] == null ? '' : String(row[col]),
     originalValue: row[col]
   };
+  editDraft.value = row[col] == null ? '' : String(row[col]);
   nextTick(() => {
     // 聚焦
     try {
@@ -366,10 +471,23 @@ function onCellClick(row, col) {
   });
 }
 
+function flushPendingEdit() {
+  const ec = editingCell.value;
+  if (!ec || !ec.row) return false;
+  const normalized = editDraft.value === '' ? null : editDraft.value;
+  if (ec.row._isNew) {
+    ec.row[ec.col] = normalized;
+    editingCell.value = null;
+    return true;
+  }
+  return false;
+}
+
 function confirmEdit() {
   const ec = editingCell.value;
   if (!ec) return;
-  const { row, col, value, originalValue } = ec;
+  const { row, col, originalValue } = ec;
+  const value = editDraft.value;
   // 空串按 null 处理
   const normalized = value === '' ? null : value;
   // 未改变 → 直接关闭
@@ -381,6 +499,7 @@ function confirmEdit() {
     // 新增行的单元格编辑直接写回，提交时一并 insert
     row[col] = normalized;
     editingCell.value = null;
+    editDraft.value = '';
     return;
   }
   // 正常行：单条 update
@@ -400,19 +519,27 @@ function confirmEdit() {
 
 function cancelEdit() {
   editingCell.value = null;
+  editDraft.value = '';
 }
 
 // --- 新增行 ---
 function startNewRow() {
+  if (isRedis.value && (props.tab.redisType === 'string' || props.tab.redisType === 'stream')) {
+    ElMessage.warning('请使用左侧右键「新建 key」');
+    return;
+  }
   if (!pkColumns.value.length) {
     ElMessage.warning('该表无主键，不支持新增');
     return;
   }
   if (newRow.value) return;
   const empty = { _isNew: true };
+  if (isRedis.value) empty.type = props.tab.redisType || null;
   columnMeta.value.forEach(c => { empty[c.Field] = null; });
   // 如果 columns 里有没在 columnMeta 的字段，也补
   columns.value.forEach(c => { if (!(c in empty)) empty[c] = null; });
+  if (isRedis.value) empty.type = props.tab.redisType || empty.type;
+  if (isRedis.value && props.tab.redisType === 'list') empty.index = total.value;
   newRow.value = empty;
   newRowSubmitting.value = false;
 }
@@ -425,13 +552,18 @@ function cancelNewRow() {
 
 async function confirmNewRow() {
   if (!newRow.value || newRowSubmitting.value) return;
+  flushPendingEdit();
+  const row = newRow.value;
   const values = {};
   const cols = columnMeta.value.length ? columnMeta.value.map(c => c.Field) : columns.value;
   cols.forEach(c => {
     // 主键自增且为空 → 跳过让数据库生成
-    if (isPk(c) && (newRow.value[c] === '' || newRow.value[c] == null)) return;
-    values[c] = newRow.value[c];
+    if (isPk(c) && (row[c] === '' || row[c] == null)) return;
+    values[c] = row[c];
   });
+  if (isRedis.value && props.tab.redisType === 'list' && row.index != null && row.index !== '') {
+    values.index = Number(row.index);
+  }
   if (!Object.keys(values).length) {
     ElMessage.warning('请至少填写一个字段');
     return;
@@ -503,6 +635,13 @@ async function confirmDelete(row, index) {
 }
 .t-label { font-size: 13px; color: var(--c-text); font-weight: 600; }
 .table-wrap { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
+.raw-wrap { flex: 1; min-height: 0; overflow: auto; background: #F8FAFC; }
+.raw-view {
+  margin: 0; padding: 12px 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px; line-height: 1.55; color: #0F172A;
+  white-space: pre-wrap; word-break: break-all;
+}
 .table-footer {
   padding: 6px 14px; border-top: 1px solid var(--c-border);
   color: var(--c-text-3); font-size: 12px; background: #fff;
@@ -563,6 +702,7 @@ async function confirmDelete(row, index) {
   font-size: 11px; line-height: 18px; text-align: center; color: #fff; font-weight: 600;
 }
 .st-new { background: var(--c-primary-light); }
+.index-input { width: 100%; padding: 2px 0; }
 
 /* 新增行操作列（固定在右侧）：放确认/取消按钮 */
 .new-row-actions {

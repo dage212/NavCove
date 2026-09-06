@@ -1,7 +1,15 @@
 const pools = new Map();
 const connMeta = new Map(); // id -> 连接配置元信息
 
+function isRedis(conn) {
+  return String(conn && conn.type || '').toLowerCase() === 'redis';
+}
+
 function buildPool(conn) {
+  if (isRedis(conn)) {
+    const { buildClient } = require('../services/redisService');
+    return buildClient(conn);
+  }
   // 懒加载：mysql2 体积大，只在真正建连接池时加载，避免拖慢后端启动
   const mysql = require('mysql2/promise');
   return mysql.createPool({
@@ -36,7 +44,8 @@ function registerConnection(id, conn) {
 function removeConnection(id) {
   const pool = pools.get(id);
   if (pool) {
-    pool.end().catch(() => {});
+    if (typeof pool.quit === 'function') pool.quit().catch(() => {});
+    else if (typeof pool.end === 'function') pool.end().catch(() => {});
     pools.delete(id);
   }
   connMeta.delete(id);

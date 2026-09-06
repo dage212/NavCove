@@ -2,8 +2,35 @@ const Router = require('@koa/router');
 const router = new Router({ prefix: '/api' });
 const { v4: uuidv4 } = require('uuid');
 const poolMgr = require('../db/pool');
-const svc = require('../services/mysqlService');
+const mysqlSvc = require('../services/mysqlService');
+const redisSvc = require('../services/redisService');
+const svc = mysqlSvc;
 const config = require('../config');
+
+function connType(connId, body) {
+  if (body && body.type) return String(body.type).toLowerCase();
+  const meta = connId ? poolMgr.getMeta(connId) : null;
+  return String((meta && meta.type) || 'mysql').toLowerCase();
+}
+
+function dbSvc(connId, body) {
+  return connType(connId, body) === 'redis' ? redisSvc : mysqlSvc;
+}
+
+function useSvc(connId, method, ...args) {
+  const handler = dbSvc(connId);
+  if (typeof handler[method] !== 'function') {
+    const err = new Error('当前连接不支持该操作');
+    err.status = 400;
+    throw err;
+  }
+  return handler[method](...args);
+}
+
+function defaultPort(body) {
+  if (body && Number(body.port)) return Number(body.port);
+  return connType(null, body) === 'redis' ? 6379 : 3306;
+}
 
 // SQLite 原生模块（better-sqlite3）体积大、加载慢。用 Proxy 延迟到首次访问数据库时才
 // require，让健康检查/静态资源/登录态判断（session 在内存）不依赖它，缩短后端就绪时间。
@@ -127,7 +154,7 @@ router.get('/connection/default', (ctx) => {
 // 测试连接
 router.post('/connection/test', async (ctx) => {
   const body = ctx.request.body || {};
-  const res = await svc.testConnection(body);
+  const res = await dbSvc(null, body).testConnection(body);
   ctx.body = ok(res, '连接成功');
 });
 
@@ -136,7 +163,7 @@ router.post('/connection/connect', async (ctx) => {
   const body = ctx.request.body || {};
   const name = (body.name || '').trim();
   if (!name) { ctx.status = 400; ctx.body = { code: 400, message: '连接名称不能为空' }; return; }
-  await svc.testConnection(body);
+  await dbSvc(null, body).testConnection(body);
   const id = body.id || uuidv4();
   poolMgr.registerConnection(id, body);
   const sess = resolveSession(ctx);
@@ -151,8 +178,8 @@ router.post('/connection/connect', async (ctx) => {
         name,
         body.type || 'mysql',
         body.host,
-        Number(body.port) || 3306,
-        body.user,
+        defaultPort(body),
+        body.user || '',
         body.password == null ? '' : body.password,
         sess ? sess.id : null,
         recordId
@@ -166,8 +193,8 @@ router.post('/connection/connect', async (ctx) => {
         name,
         body.type || 'mysql',
         body.host,
-        Number(body.port) || 3306,
-        body.user,
+        defaultPort(body),
+        body.user || '',
         body.password == null ? '' : body.password,
         sess ? sess.id : null
       );
@@ -211,21 +238,26 @@ router.get('/connection/:id', (ctx) => {
 // --- 数据库 / 表 ---
 router.get('/databases', async (ctx) => {
   const { connId } = ctx.query;
-  ctx.body = ok(await svc.listDatabases(connId));
+  ctx.body = ok(await dbSvc(connId).listDatabases(connId));
 });
 
 router.get('/tables', async (ctx) => {
   const { connId, database } = ctx.query;
-  ctx.body = ok(await svc.listTables(connId, database));
+  ctx.body = ok(await dbSvc(connId).listTables(connId, database));
 });
 
 router.get('/table/columns', async (ctx) => {
   const { connId, database, table } = ctx.query;
-  ctx.body = ok(await svc.describeTable(connId, database, table));
+  ctx.body = ok(await useSvc(connId, 'describeTable', connId, database, table));
 });
 
 router.get('/table/data', async (ctx) => {
   const { connId, database, table, page, size, orderColumn, orderDir } = ctx.query;
+  const handler = dbSvc(connId);
+  if (handler === redisSvc) {
+    ctx.body = ok(await redisSvc.getTableData(connId, database, table));
+    return;
+  }
   ctx.body = ok(await svc.getTableData(connId, database, table, {
     page: Number(page) || 1,
     size: Number(size) || 50,
@@ -245,7 +277,7 @@ router.post('/table/save', async (ctx) => {
 router.put('/table/row', async (ctx) => {
   const { connId, database, table, pk, values } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `UPDATE \`${database}\`.\`${table}\` SET ...`, sqlType: 'UPDATE' },
-    () => svc.updateRow(connId, database, table, pk, values));
+    () => useSvc(connId, 'updateRow', connId, database, table, pk, values));
   ctx.body = ok(res, res.updated ? '更新成功' : '无变化');
 });
 
@@ -253,7 +285,7 @@ router.put('/table/row', async (ctx) => {
 router.post('/table/row', async (ctx) => {
   const { connId, database, table, values } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `INSERT INTO \`${database}\`.\`${table}\` (...)`, sqlType: 'INSERT' },
-    () => svc.insertRow(connId, database, table, values));
+    () => useSvc(connId, 'insertRow', connId, database, table, values));
   ctx.body = ok(res, `插入成功 ${res.inserted} 行`);
 });
 
@@ -261,7 +293,7 @@ router.post('/table/row', async (ctx) => {
 router.delete('/table/row', async (ctx) => {
   const { connId, database, table, pk } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `DELETE FROM \`${database}\`.\`${table}\` WHERE ...`, sqlType: 'DELETE' },
-    () => svc.deleteRow(connId, database, table, pk));
+    () => useSvc(connId, 'deleteRow', connId, database, table, pk));
   ctx.body = ok(res, `删除成功 ${res.deleted} 行`);
 });
 
@@ -269,7 +301,7 @@ router.delete('/table/row', async (ctx) => {
 router.post('/table/create', async (ctx) => {
   const { connId, database, table, columns } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `CREATE TABLE \`${database}\`.\`${table}\``, sqlType: 'CREATE' },
-    () => svc.createTable(connId, database, table, columns));
+    () => useSvc(connId, 'createTable', connId, database, table, columns));
   ctx.body = ok(res, `表 ${table} 创建成功`);
 });
 
@@ -277,7 +309,7 @@ router.post('/table/create', async (ctx) => {
 router.delete('/table', async (ctx) => {
   const { connId, database, table } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `DROP TABLE \`${database}\`.\`${table}\``, sqlType: 'DROP' },
-    () => svc.dropTable(connId, database, table));
+    () => useSvc(connId, 'dropTable', connId, database, table));
   ctx.body = ok(res, `表 ${table} 已删除`);
 });
 
@@ -285,7 +317,7 @@ router.delete('/table', async (ctx) => {
 router.post('/table/truncate', async (ctx) => {
   const { connId, database, table } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `TRUNCATE TABLE \`${database}\`.\`${table}\``, sqlType: 'TRUNCATE' },
-    () => svc.truncateTable(connId, database, table));
+    () => useSvc(connId, 'truncateTable', connId, database, table));
   ctx.body = ok(res, `表 ${table} 已清空`);
 });
 
@@ -301,7 +333,7 @@ router.post('/table/copy', async (ctx) => {
 router.post('/table/rename', async (ctx) => {
   const { connId, database, oldName, newName } = ctx.request.body || {};
   const res = await withLog(ctx, { connId, database, sqlText: `RENAME TABLE \`${database}\`.\`${oldName}\` -> \`${newName}\``, sqlType: 'ALTER' },
-    () => svc.renameTable(connId, database, oldName, newName));
+    () => useSvc(connId, 'renameTable', connId, database, oldName, newName));
   ctx.body = ok(res, `已重命名为 ${newName}`);
 });
 
@@ -355,7 +387,7 @@ router.post('/query', async (ctx) => {
     return;
   }
   try {
-    const results = await svc.executeSql(connId, database, sql);
+    const results = await dbSvc(connId).executeSql(connId, database, sql);
     const affected = results.reduce((s, r) => s + (r.type !== 'select' && r.type !== 'error' ? (r.affected || 0) : 0), 0);
     const errRes = results.find(r => r.type === 'error');
     logOp(ctx, { connId, database, sqlText: sql, affected, status: errRes ? 'partial' : 'success', error: errRes ? (errRes.message || '') : '' });

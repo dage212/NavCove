@@ -18,7 +18,7 @@
       <h1>NavCove</h1>
       <div class="sub-title">企业级数据库管理平台</div>
       <div class="features">
-        <div class="ft"><span class="ft-icon"><el-icon><Coin /></el-icon></span>支持 MySQL 多数据库连接与管理</div>
+        <div class="ft"><span class="ft-icon"><el-icon><Coin /></el-icon></span>支持 MySQL / Redis 多连接管理</div>
         <div class="ft"><span class="ft-icon"><el-icon><Promotion /></el-icon></span>在线 SQL 编辑器 · 语法高亮 · 智能补全</div>
         <div class="ft"><span class="ft-icon"><el-icon><Edit /></el-icon></span>表数据可视化编辑 · 暂存确认 · 批量导入导出</div>
         <div class="ft"><span class="ft-icon"><el-icon><Lock /></el-icon></span>安全鉴权 · 数据操作留痕</div>
@@ -141,17 +141,17 @@
         <!-- SQL 编辑器 -->
         <div class="editor-pane">
           <div class="editor-head">
-            <span class="label">SQL 编辑器</span>
+            <span class="label">{{ isRedis ? '命令' : 'SQL 编辑器' }}</span>
             <el-select
               v-model="databaseSelect"
               size="small"
               class="db-select"
-              placeholder="选择数据库"
+              :placeholder="isRedis ? '选择库' : '选择数据库'"
               style="width: 180px; margin-left: 12px;"
               @change="onDbChange"
               :disabled="!connected"
             >
-              <el-option v-for="db in databases" :key="db" :label="db" :value="db" />
+              <el-option v-for="db in databases" :key="db" :label="isRedis ? ('DB ' + db) : db" :value="db" />
             </el-select>
             <div class="spacer"></div>
             <el-button-group size="small">
@@ -186,10 +186,10 @@
               <div class="empty-icon-wrap">
                 <el-icon class="empty-icon"><DataAnalysis /></el-icon>
               </div>
-              <span v-if="currentDb" class="empty-text">执行 SQL 或选择左侧表查看数据</span>
+              <span v-if="currentDb" class="empty-text">{{ isRedis ? '执行命令或选择左侧 key 查看数据' : '执行 SQL 或选择左侧表查看数据' }}</span>
               <template v-else>
-                <span class="empty-title">未选择数据库</span>
-                <span class="empty-desc">请从左侧库表树中选择一个数据库和表</span>
+                <span class="empty-title">{{ isRedis ? '未选择 Redis 库' : '未选择数据库' }}</span>
+                <span class="empty-desc">{{ isRedis ? '请从左侧选择一个库和 key' : '请从左侧库表树中选择一个数据库和表' }}</span>
               </template>
             </div>
             <el-tabs v-else-if="resultTabs.length" v-model="activeTab" class="result-tabs" type="card">
@@ -238,8 +238,26 @@
       @click.stop
       @contextmenu.prevent.stop
     >
+      <!-- Redis 库菜单 -->
+      <template v-if="isRedis && contextMenu.kind === 'database'">
+        <li class="ctx-item" @click="onCtxCommand('create-redis-key')">
+          <el-icon><CirclePlus /></el-icon><span>新建 key</span>
+        </li>
+      </template>
+      <!-- Redis key 菜单 -->
+      <template v-else-if="isRedis">
+        <li class="ctx-item" @click="onCtxCommand('rename-redis-key')">
+          <el-icon><EditPen /></el-icon><span>重命名</span>
+        </li>
+        <li class="ctx-item" @click="onCtxCommand('truncate')">
+          <el-icon><DeleteFilled /></el-icon><span>清空</span>
+        </li>
+        <li class="ctx-item ctx-danger" @click="onCtxCommand('drop')">
+          <el-icon><Delete /></el-icon><span>删除 key</span>
+        </li>
+      </template>
       <!-- 数据库菜单 -->
-      <template v-if="contextMenu.kind === 'database'">
+      <template v-else-if="contextMenu.kind === 'database'">
         <li class="ctx-item" @click="onCtxCommand('create-db')">
           <el-icon><CirclePlus /></el-icon><span>新建数据库</span>
         </li>
@@ -302,6 +320,41 @@
     </ul>
 
     <!-- 新建表对话框 -->
+    <el-dialog v-model="redisKeyDialog.visible" title="新建 Redis key" width="420px" :close-on-click-modal="false">
+      <el-form :model="redisKeyDialog" label-width="72px">
+        <el-form-item label="库">
+          <el-input :model-value="'DB ' + redisKeyDialog.database" disabled />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-select v-model="redisKeyDialog.redisType" style="width:100%">
+            <el-option label="string" value="string" />
+            <el-option label="hash" value="hash" />
+            <el-option label="list" value="list" />
+            <el-option label="set" value="set" />
+            <el-option label="zset" value="zset" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Key">
+          <el-input v-model="redisKeyDialog.name" placeholder="例如 demo:newkey" />
+        </el-form-item>
+        <el-form-item v-if="redisKeyDialog.redisType === 'hash'" label="Field">
+          <el-input v-model="redisKeyDialog.field" placeholder="field" />
+        </el-form-item>
+        <el-form-item v-if="redisKeyDialog.redisType === 'zset'" label="Member">
+          <el-input v-model="redisKeyDialog.member" placeholder="member" />
+        </el-form-item>
+        <el-form-item v-if="redisKeyDialog.redisType === 'zset'" label="Score">
+          <el-input-number v-model="redisKeyDialog.score" controls-position="right" style="width:100%" />
+        </el-form-item>
+        <el-form-item v-if="redisKeyDialog.redisType !== 'zset'" label="Value">
+          <el-input v-model="redisKeyDialog.value" placeholder="初始值，可留空" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="redisKeyDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="redisKeyDialog.saving" @click="confirmCreateRedisKey">创建</el-button>
+      </template>
+    </el-dialog>
     <create-table-dialog v-model:visible="createTableDialog.visible" :conn="connection" :database="createTableDialog.database" @done="onTableCreated" />
     <!-- 新建数据库对话框 -->
     <create-database-dialog v-model:visible="createDatabaseDialog.visible" :conn="connection" @done="onDatabaseCreated" />
@@ -440,6 +493,35 @@ const resultTabs = computed({ get: () => curConn.value?.resultTabs ?? [], set: (
 const activeTab = computed({ get: () => curConn.value?.activeTab ?? '', set: (v) => { if (curConn.value) curConn.value.activeTab = v; } });
 const resultMeta = computed({ get: () => curConn.value?.resultMeta ?? '', set: (v) => { if (curConn.value) curConn.value.resultMeta = v; } });
 const connected = computed(() => connTabs.value.length > 0 && !!curConn.value);
+const isRedis = computed(() => connection.value.type === 'redis');
+function editorHint(conn) {
+  return (conn && conn.type === 'redis')
+    ? '# 输入 Redis 命令，Ctrl+Enter 执行\n'
+    : '-- 在此输入 SQL 语句，Ctrl+Enter 执行\n';
+}
+function dbNodeLabel(name, conn) {
+  return (conn && conn.type === 'redis') ? ('DB ' + name) : name;
+}
+function dbEntryName(d) {
+  return d && typeof d === 'object' ? String(d.name) : String(d);
+}
+function dbEntryRows(d) {
+  return d && typeof d === 'object' && d.rows != null ? d.rows : null;
+}
+function mapDbList(list) {
+  return (list || []).map(dbEntryName);
+}
+function mapDbTree(list, conn, connId) {
+  return (list || []).map((d) => ({
+    key: 'db:' + dbEntryName(d),
+    label: dbNodeLabel(dbEntryName(d), conn),
+    type: 'database',
+    name: dbEntryName(d),
+    rows: dbEntryRows(d),
+    connId,
+    children: []
+  }));
+}
 
 const sidebarCollapsed = ref(false);
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; }
@@ -631,10 +713,8 @@ async function onConnected(conn) {
     const databasesForTab = await api.listDatabases(newTab.connection.id);
     const targetTab = connTabs.value.find((tab) => tab.id === newTab.id);
     if (!targetTab) return;
-    targetTab.databases = databasesForTab;
-    targetTab.treeData = databasesForTab.map((d) => ({
-      key: 'db:' + d, label: d, type: 'database', name: d, connId: newTab.id, children: []
-    }));
+    targetTab.databases = mapDbList(databasesForTab);
+    targetTab.treeData = mapDbTree(databasesForTab, newTab.connection, newTab.id);
   } catch (e) {
     ElMessage.error('获取数据库列表失败: ' + e.message);
   }
@@ -653,8 +733,8 @@ async function onConnected(conn) {
   tabState.resultTabs = [];
   tabState.activeTab = '';
   tabState.resultMeta = '';
-  tabState.sql = '';
-  if (cmInstance) cmInstance.setValue('');
+  tabState.sql = editorHint(tabState.connection);
+  if (cmInstance) cmInstance.setValue(tabState.sql);
 }
 
 // 保存当前 cmInstance 内容到当前 connTab.sql
@@ -679,7 +759,7 @@ async function switchConnTab(id) {
   // 结果页签和表操作通过 tab.connId 固定绑定连接；切换时只重建当前页签组件。
   nextTick(() => {
     if (cmInstance) {
-      cmInstance.setValue(nextTab.sql || '-- 在此输入 SQL 语句，Ctrl+Enter 执行\n');
+      cmInstance.setValue(nextTab.sql || editorHint(nextTab.connection));
     }
     treeRef.value?.setCurrentKey(null);
   });
@@ -704,7 +784,7 @@ function closeConnTab(id) {
 }
 
 async function loadDatabases() {
-  try { databases.value = await api.listDatabases(connection.value.id); }
+  try { databases.value = mapDbList(await api.listDatabases(connection.value.id)); }
   catch (e) { ElMessage.error('获取数据库列表失败: ' + e.message); }
 }
 
@@ -716,10 +796,8 @@ async function refreshTree() {
   // 刷新期间可能已经切换到另一个连接，旧请求不能覆盖当前页签的数据。
   const targetTab = connTabs.value.find((tab) => tab.id === requestConnId);
   if (!targetTab) return;
-  targetTab.databases = dbs;
-  targetTab.treeData = dbs.map((d) => ({
-    key: 'db:' + d, label: d, type: 'database', name: d, connId: requestConnId, children: []
-  }));
+  targetTab.databases = mapDbList(dbs);
+  targetTab.treeData = mapDbTree(dbs, targetTab.connection, requestConnId);
 }
 
 async function loadNode(node, resolve) {
@@ -738,7 +816,9 @@ async function loadNode(node, resolve) {
         connId: requestTabId, rows: t.rows, isLeaf: true
       })));
     } catch (e) {
-      if (activeConnId.value === requestTabId) ElMessage.error('加载表失败: ' + e.message);
+      if (activeConnId.value === requestTabId) {
+        ElMessage.error((requestConn.connection.type === 'redis' ? '加载 key 失败: ' : '加载表失败: ') + e.message);
+      }
       resolve([]);
     }
   } else resolve([]);
@@ -764,14 +844,31 @@ function onDbChange(val) {
     curConn.value.databaseSelect = val || '';
     curConn.value.currentDb = val || '';
   }
-  if (val) ElMessage.success({ message: `已切换到数据库: ${val}`, duration: 1500 });
+  if (val) ElMessage.success({ message: isRedis.value ? `已切换到 DB ${val}` : `已切换到数据库: ${val}`, duration: 1500 });
 }
 
-function viewTableData(data) {
+async function viewTableData(data) {
   currentDb.value = data.database;
   databaseSelect.value = data.database;
   if (curConn.value) curConn.value.databaseSelect = data.database;
   currentTable.value = data.name;
+  if (connection.value.type === 'redis') {
+    try {
+      const res = await api.tableData(connection.value.id, data.database, data.name, { page: 1, size: 200 });
+      openResultTab({
+        kind: 'table',
+        engine: 'redis',
+        redisType: res.keyType || (res.rows && res.rows[0] && res.rows[0].type) || 'string',
+        connId: connection.value.id,
+        database: data.database,
+        table: data.name,
+        label: data.name
+      });
+    } catch (e) {
+      ElMessage.error('读取 key 失败: ' + e.message);
+    }
+    return;
+  }
   openResultTab({
     kind: 'table', connId: connection.value.id, database: data.database, table: data.name, label: data.name
   });
@@ -803,9 +900,9 @@ async function runSql() {
   const execTabId = activeConnId.value;
   const execConnId = connection.value.id;
   const execDb = databaseSelect.value;
-  if (!execDb) { ElMessage.warning('请先在 SQL 编辑器下拉框中选择数据库'); return; }
+  if (!execDb) { ElMessage.warning(isRedis.value ? '请先选择 Redis 库' : '请先在 SQL 编辑器下拉框中选择数据库'); return; }
   const sql = cmInstance.getValue();
-  if (!sql || !sql.trim()) { ElMessage.warning('SQL 不能为空'); return; }
+  if (!sql || !sql.trim()) { ElMessage.warning(isRedis.value ? '命令不能为空' : 'SQL 不能为空'); return; }
   loading.value = true;
   if (curConn.value) curConn.value.resultMeta = '';
   try {
@@ -865,6 +962,7 @@ function clearSql() { if (cmInstance) cmInstance.setValue(''); }
 
 function formatSql() {
   if (!cmInstance) return;
+  if (isRedis.value) { ElMessage.info('Redis 命令无需美化'); return; }
   const sql = cmInstance.getValue();
   if (!sql.trim()) return;
   cmInstance.setValue(simpleFormat(sql));
@@ -1009,6 +1107,51 @@ function onImportDone(payload) {
   if (db) reloadTablesOfDb(db);
   // 如果导入的是某张具体表，并且这个表的 Tab 打开了，刷新结果区
   if (tbl) refreshActiveTableTabsIfMatch(db, tbl);
+}
+
+const redisKeyDialog = reactive({
+  visible: false,
+  saving: false,
+  database: '',
+  redisType: 'string',
+  name: '',
+  field: 'field',
+  member: 'member',
+  score: 0,
+  value: ''
+});
+function openRedisKeyDialog(data) {
+  redisKeyDialog.database = (data && data.name) || currentDb.value || '0';
+  redisKeyDialog.redisType = 'string';
+  redisKeyDialog.name = '';
+  redisKeyDialog.field = 'field';
+  redisKeyDialog.member = 'member';
+  redisKeyDialog.score = 0;
+  redisKeyDialog.value = '';
+  redisKeyDialog.saving = false;
+  redisKeyDialog.visible = true;
+}
+async function confirmCreateRedisKey() {
+  const name = (redisKeyDialog.name || '').trim();
+  if (!name) { ElMessage.warning('请输入 key 名称'); return; }
+  redisKeyDialog.saving = true;
+  try {
+    await api.createTable(connection.value.id, redisKeyDialog.database, name, {
+      redisType: redisKeyDialog.redisType,
+      value: redisKeyDialog.value,
+      field: redisKeyDialog.field,
+      member: redisKeyDialog.member,
+      score: redisKeyDialog.score
+    });
+    ElMessage.success(`已创建 ${redisKeyDialog.redisType}「${name}」`);
+    redisKeyDialog.visible = false;
+    await refreshTree();
+    viewTableData({ name, database: redisKeyDialog.database, type: 'table' });
+  } catch (e) {
+    ElMessage.error('创建失败: ' + e.message);
+  } finally {
+    redisKeyDialog.saving = false;
+  }
 }
 
 // 新建表对话框
@@ -1184,6 +1327,8 @@ async function onCtxCommand(cmd) {
     case 'export-sql': openExportSqlTableDialog(data); break;
     case 'import-sql': handleImportSql(data); break;
     case 'view-table-structure': openTableStructureTab(data); break;
+    case 'create-redis-key': openRedisKeyDialog(data); break;
+    case 'rename-redis-key': handleRenameTable(data); break;
     case 'rename': handleRenameTable(data); break;
     case 'copy': handleCopyTable(data); break;
     case 'truncate': handleTruncateTable(data); break;
@@ -1311,12 +1456,16 @@ function handleImportSql(data) {
 // 重命名表
 async function handleRenameTable(data) {
   try {
-    const res = await ElMessageBox.prompt('请输入新表名', `重命名「${data.name}」`, {
-      confirmButtonText: '确定', cancelButtonText: '取消',
-      inputValue: data.name,
-      inputPattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-      inputErrorMessage: '表名只能以字母/下划线开头，含字母数字下划线'
-    });
+    const res = await ElMessageBox.prompt(
+      isRedis.value ? '请输入新的 key 名称' : '请输入新表名',
+      `重命名「${data.name}」`,
+      {
+        confirmButtonText: '确定', cancelButtonText: '取消',
+        inputValue: data.name,
+        inputPattern: isRedis.value ? /\S+/ : /^[A-Za-z_][A-Za-z0-9_]*$/,
+        inputErrorMessage: isRedis.value ? 'key 名称不能为空' : '表名只能以字母/下划线开头，含字母数字下划线'
+      }
+    );
     const newName = res.value.trim();
     if (newName === data.name) return;
     await api.renameTable(connection.value.id, data.database, data.name, newName);
@@ -1355,8 +1504,10 @@ function handleTruncateTable(data) {
   dropDialog.data = data;
   dropDialog.targetName = data.name;
   dropDialog.inputName = '';
-  dropDialog.title = '清空表确认';
-  dropDialog.message = `确认清空表「${data.name}」的所有数据？该操作不可恢复！`;
+  dropDialog.title = isRedis.value ? '清空 key 确认' : '清空表确认';
+  dropDialog.message = isRedis.value
+    ? `确认清空 key「${data.name}」的所有内容？该操作不可恢复！`
+    : `确认清空表「${data.name}」的所有数据？该操作不可恢复！`;
   dropDialog.visible = true;
 }
 async function doTruncateTable(data) {
@@ -1375,8 +1526,10 @@ function handleDropTable(data) {
   dropDialog.data = data;
   dropDialog.targetName = data.name;
   dropDialog.inputName = '';
-  dropDialog.title = '删除表确认';
-  dropDialog.message = `确认删除表「${data.name}」？表结构和数据将全部删除，不可恢复！`;
+  dropDialog.title = isRedis.value ? '删除 key 确认' : '删除表确认';
+  dropDialog.message = isRedis.value
+    ? `确认删除 key「${data.name}」？该操作不可恢复！`
+    : `确认删除表「${data.name}」？表结构和数据将全部删除，不可恢复！`;
   dropDialog.visible = true;
 }
 async function doDropTable(data) {
