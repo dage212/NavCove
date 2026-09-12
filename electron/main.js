@@ -165,7 +165,8 @@ async function createWindow() {
   mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('win-fullscreen-changed', false));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    // 仅允许 http(s) 外链用系统浏览器打开，其它协议一律拦截
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 

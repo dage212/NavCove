@@ -118,8 +118,9 @@
                   @keyup.enter="confirmEdit"
                   @keyup.esc="cancelEdit"
                   @blur="onEditBlur"
+                  @input="onEditInput"
                 />
-                <div v-if="!row._isNew" class="cell-actions">
+                <div v-if="!row._isNew && editDirty" class="cell-actions">
                   <el-button size="small" type="success" text @click="confirmEdit" :title="t('table.confirmEdit')">
                     <el-icon><Check /></el-icon>
                   </el-button>
@@ -290,6 +291,7 @@ const isEditable = computed(() => !!(props.tab.database && props.tab.table && (p
 // 当有值时：{ row, col, originalValue }；输入内容单独放 editDraft，避免和 hash 的 value 列 / ref.value 撞名
 const editingCell = ref(null);
 const editDraft = ref('');
+const editDirty = ref(false); // 输入内容与 originalValue 不一致时才显示 ✓/✗
 const cellInputRef = ref(null);
 
 // --- 新增行状态 ---
@@ -505,6 +507,7 @@ function onCellClick(row, col) {
     originalValue: row[col]
   };
   editDraft.value = row[col] == null ? '' : String(row[col]);
+  editDirty.value = false;
   nextTick(() => {
     // 聚焦
     try {
@@ -527,9 +530,22 @@ function flushPendingEdit() {
 }
 
 function onEditBlur() {
-  if (editingCell.value && editingCell.value.row && editingCell.value.row._isNew) {
-    flushPendingEdit();
+  if (editingCell.value) {
+    if (editingCell.value.row && editingCell.value.row._isNew) {
+      flushPendingEdit();
+    } else if (!editDirty.value) {
+      // 普通行：没改动就静默退出，不弹确认
+      editingCell.value = null;
+    }
   }
+}
+
+// 输入变化时与原值比较：有变动才置脏并显示 ✓/✗，改回去则隐藏
+function onEditInput() {
+  const ec = editingCell.value;
+  if (!ec) { editDirty.value = false; return; }
+  const normalized = editDraft.value === '' ? null : editDraft.value;
+  editDirty.value = String(normalized ?? '') !== String(ec.originalValue ?? '');
 }
 
 function confirmEdit() {
@@ -542,6 +558,7 @@ function confirmEdit() {
   // 未改变 → 直接关闭
   if (String(normalized ?? '') === String(originalValue ?? '')) {
     editingCell.value = null;
+    editDirty.value = false;
     return;
   }
   if (row._isNew) {
@@ -549,6 +566,7 @@ function confirmEdit() {
     row[col] = normalized;
     editingCell.value = null;
     editDraft.value = '';
+    editDirty.value = false;
     return;
   }
   // 正常行：单条 update
@@ -562,6 +580,7 @@ function confirmEdit() {
       row[col] = normalized;
       ElMessage.success(t('table.updated'));
       editingCell.value = null;
+      editDirty.value = false;
     })
     .catch((e) => { ElMessage.error(t('table.updateFail', { message: e.message })); editingCell.value && (editingCell.value.submitting = false); });
 }
@@ -569,6 +588,7 @@ function confirmEdit() {
 function cancelEdit() {
   editingCell.value = null;
   editDraft.value = '';
+  editDirty.value = false;
 }
 
 // --- 新增行 ---

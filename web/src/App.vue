@@ -25,7 +25,7 @@
         <div class="ft"><span class="ft-icon"><el-icon><Edit /></el-icon></span>{{ t('login.feat3') }}</div>
         <div class="ft"><span class="ft-icon"><el-icon><Lock /></el-icon></span>{{ t('login.feat4') }}</div>
       </div>
-      <div class="copyright">© 2026 NavCove · Powered by Vue 3 + Koa</div>
+      <div class="copyright"><a class="copyright-link" @click="openGithub">© 2026 NavCove · Powered by dage212</a></div>
     </div>
     <div class="login-right">
       <div class="login-lang">
@@ -438,6 +438,19 @@ onMounted(() => {
 });
 
 const settingsVisible = ref(false);
+
+const GITHUB_URL = 'https://github.com/dage212/NavCove';
+function openGithub() {
+  // Electron 壳里 window.open 会被拦截，优先走 preload 暴露的 openExternal
+  try {
+    const api = window.navcove || window.electron || null;
+    if (api && typeof api.openExternal === 'function') {
+      api.openExternal(GITHUB_URL);
+      return;
+    }
+  } catch (e) {}
+  window.open(GITHUB_URL, '_blank', 'noopener');
+}
 
 // ============ 登录 ============
 const loggedIn = ref(false);
