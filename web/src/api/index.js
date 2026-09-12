@@ -54,6 +54,7 @@ export const api = {
   listDatabases: (connId) => http.get('/databases', { params: { connId } }),
   listTables: (connId, database) => http.get('/tables', { params: { connId, database } }),
   tableColumns: (connId, database, table) => http.get('/table/columns', { params: { connId, database, table } }),
+  tableColumnIndexes: (connId, database, table) => http.get('/table/column-indexes', { params: { connId, database, table } }),
   tableData: (connId, database, table, params) => http.get('/table/data', { params: { connId, database, table, ...params } }),
   saveTable: (connId, database, table, changes) => http.post('/table/save', { connId, database, table, changes }),
   // 单行操作（按主键）

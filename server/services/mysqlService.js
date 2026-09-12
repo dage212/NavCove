@@ -113,6 +113,48 @@ async function describeTable(connId, database, table) {
   return cols;
 }
 
+// 获取表的列索引信息：返回每个列参与的索引（用于列表头打 PK/UNI/IDX 标签）
+// 用 STATISTICS 而不是 COLUMNS.COLUMN_KEY：后者只标首列，且 MUL 无法区分是普通索引还是唯一索引的一部分
+// INDEX_TYPE 区分索引实现：BTREE（普通/唯一/主键）、FULLTEXT（全文）、SPATIAL（空间）
+async function getColumnIndexes(connId, database, table) {
+  const pool = poolMgr.getPool(connId);
+  const [rows] = await pool.query(
+    `SELECT INDEX_NAME AS name, NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS seq,
+            COLUMN_NAME AS columnName, INDEX_TYPE AS indexType
+     FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+     ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+    [database, table]
+  );
+  const byColumn = {};
+  const indexSize = {};
+  for (const r of rows) {
+    indexSize[r.name] = (indexSize[r.name] || 0) + 1;
+  }
+  for (const r of rows) {
+    if (!r.columnName) continue;
+    const type = String(r.indexType || '').toUpperCase();
+    const isPk = r.name === 'PRIMARY';
+    // FULLTEXT / SPATIAL 是独立类型，不按 NON_UNIQUE 归类
+    const kind = isPk ? 'PRI' : (type === 'FULLTEXT' ? 'FT' : (type === 'SPATIAL' ? 'SP' : (Number(r.nonUnique) === 0 ? 'UNI' : 'IDX')));
+    const rank = kind === 'PRI' ? 0 : (kind === 'UNI' ? 1 : (kind === 'FT' ? 2 : (kind === 'SP' ? 3 : 4)));
+    const list = byColumn[r.columnName] || (byColumn[r.columnName] = []);
+    list.push({
+      name: r.name,
+      kind,
+      rank,
+      seq: Number(r.seq) || 1,
+      indexType: r.indexType,
+      columnCount: indexSize[r.name] || 1,
+      isPk
+    });
+  }
+  for (const key of Object.keys(byColumn)) {
+    byColumn[key].sort((a, b) => a.rank - b.rank);
+  }
+  return byColumn;
+}
+
 // 获取表数据（分页）
 async function getTableData(connId, database, table, { page = 1, size = 50, order } = {}) {
   const pool = poolMgr.getPool(connId);
@@ -1481,6 +1523,7 @@ module.exports = {
   getDatabaseInfo,
   getDatabaseStructure,
   getTableStructure,
+  getColumnIndexes,
   exportTableSqlStream,
   exportDatabaseSqlStream
 };

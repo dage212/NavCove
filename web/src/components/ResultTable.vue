@@ -79,7 +79,6 @@
         :row-class-name="rowClass"
         @sort-change="onSort"
       >
-        <el-table-column type="index" label="#" width="50" fixed />
         <el-table-column
           v-for="col in columns"
           :key="col"
@@ -92,7 +91,8 @@
           <template #header>
             <div class="col-head">
               {{ col }}
-              <span v-if="!isRedis && pkColumns.includes(col)" class="pk-badge" :title="t('table.pk')">PK</span>
+              <span v-if="!isRedis && isPk(col)" class="pk-badge" :title="t('table.pk')">PK</span>
+              <span v-else-if="!isRedis && indexLabelOf(col)" :class="indexClsOf(col)" :title="indexTitleOf(col)">{{ indexLabelOf(col) }}</span>
               <span v-if="colNull(col)" class="null-mark" :title="t('table.nullable')">?</span>
             </div>
           </template>
@@ -203,9 +203,46 @@ const page = ref(1);
 const size = ref(50);
 const sort = ref({});
 
-// 表结构 & 主键
+// 表结构 & 主键 & 列索引
 const columnMeta = ref([]);
 const pkColumns = ref([]);
+// 列 -> 参与的索引列表（[{ name, kind: PRI/UNI/IDX/FT/SP, seq, indexType, columnCount }]，按优先级排序）
+const columnIndexes = ref({});
+
+function isPk(col) { return pkColumns.value.includes(col); }
+
+// 列的索引标签：主键归 PK 逻辑处理，这里只处理非主键索引；
+// 返回优先级最高的索引（UNI > FT > SP > IDX，同级取首个），null 表示无索引
+function bestIndexOf(col) {
+  const list = columnIndexes.value[col];
+  if (!list || !list.length) return null;
+  return list.find((x) => !x.isPk) || null;
+}
+function indexLabelOf(col) {
+  const b = bestIndexOf(col);
+  if (!b) return '';
+  if (b.kind === 'UNI') return 'UNI';
+  if (b.kind === 'FT') return 'FT';
+  if (b.kind === 'SP') return 'SP';
+  return 'IDX';
+}
+function indexClsOf(col) {
+  const b = bestIndexOf(col);
+  if (!b) return 'idx-badge';
+  if (b.kind === 'FT') return 'idx-badge ft-badge';
+  if (b.kind === 'SP') return 'idx-badge sp-badge';
+  return 'idx-badge';
+}
+function indexTitleOf(col) {
+  const list = columnIndexes.value[col];
+  if (!list || !list.length) return '';
+  const parts = list.map((x) => {
+    const solo = x.columnCount <= 1 ? '' : ` (#${x.seq}/${x.columnCount})`;
+    const type = x.indexType ? ` ${x.indexType}` : '';
+    return `${x.kind} ${x.name}${solo}${type}`;
+  });
+  return parts.join('；') + t('table.indexHint');
+}
 
 const isRedis = computed(() => props.tab.engine === 'redis');
 const showRaw = ref(false);
@@ -335,9 +372,18 @@ async function loadColumnMeta() {
       pkColumns.value = columnMeta.value.filter((c) => c.Key === 'PRI').map((c) => c.Field);
       if (!columns.value.length) columns.value = fields;
     }
+    // 非主键索引标签：和列结构并行拉，不阻塞数据渲染；失败则静默降级为只显示 PK
+    if (!isRedis.value && isEditable.value && typeof api.tableColumnIndexes === 'function') {
+      api.tableColumnIndexes(props.connId || props.tab.connId, props.tab.database, props.tab.table)
+        .then((m) => { columnIndexes.value = m || {}; })
+        .catch(() => { columnIndexes.value = {}; });
+    } else {
+      columnIndexes.value = {};
+    }
   } catch (e) {
     // 容错：列结构拉不到时用已有数据的 keys 作 columns，pkColumns 留空
     if (!columns.value.length) columns.value = fallbackColumns();
+    columnIndexes.value = {};
   }
 }
 
@@ -418,7 +464,6 @@ function rowClass({ row }) {
   return '';
 }
 
-function isPk(col) { return pkColumns.value.includes(col); }
 function colNull(col) {
   const m = columnMeta.value.find(c => c.Field === col);
   return m && m.Null === 'YES';
@@ -653,6 +698,9 @@ async function confirmDelete(row, index) {
 }
 .col-head { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .pk-badge { background: var(--c-primary); color: #fff; font-size: 9px; padding: 0 4px; border-radius: 2px; line-height: 14px; font-weight: 600; }
+.idx-badge { background: #8b5cf6; color: #fff; font-size: 9px; padding: 0 4px; border-radius: 2px; line-height: 14px; font-weight: 600; }
+.ft-badge { background: #0ea5e9; }
+.sp-badge { background: #10b981; }
 .null-mark { color: var(--c-text-3); font-size: 11px; }
 
 :deep(.null-cell) { color: var(--c-text-3); font-style: italic; }

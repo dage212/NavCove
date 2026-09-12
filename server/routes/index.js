@@ -251,6 +251,16 @@ router.get('/table/columns', async (ctx) => {
   ctx.body = ok(await useSvc(connId, 'describeTable', connId, database, table));
 });
 
+router.get('/table/column-indexes', async (ctx) => {
+  const { connId, database, table } = ctx.query;
+  const handler = dbSvc(connId);
+  if (typeof handler.getColumnIndexes !== 'function') {
+    ctx.body = ok({});
+    return;
+  }
+  ctx.body = ok(await handler.getColumnIndexes(connId, database, table));
+});
+
 router.get('/table/data', async (ctx) => {
   const { connId, database, table, page, size, orderColumn, orderDir } = ctx.query;
   const handler = dbSvc(connId);
