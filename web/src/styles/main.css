@@ -277,36 +277,11 @@ body {
 }
 .editor-head .label { font-size: 12px; color: var(--c-text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
 .editor-head .spacer { flex: 1; }
-/* 数据库下拉选择 */
+.editor-head .db-select .el-select__wrapper,
 .editor-head .db-select .el-input__wrapper {
-  background: var(--c-primary);
-  box-shadow: none !important;
-  border: none;
-  padding: 0 8px 0 12px;
-  height: 32px;
-  border-radius: 6px;
+  min-height: 28px;
+  height: 28px;
 }
-.editor-head .db-select .el-input__inner {
-  color: #fff !important; font-weight: 600; font-size: 14px;
-  cursor: pointer;
-  -webkit-text-fill-color: #fff;
-}
-.editor-head .db-select .el-input__inner::placeholder { color: rgba(255,255,255,.7); }
-.editor-head .db-select .el-select__caret {
-  color: #fff !important;
-  font-size: 18px !important;
-  width: 20px;
-  opacity: 1 !important;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-}
-.editor-head .db-select .el-input__wrapper:hover { background: var(--c-primary-light); }
-.editor-head .db-select.is-disabled .el-input__wrapper {
-  background: var(--c-bg-gray); border: 1px solid var(--c-border);
-}
-.editor-head .db-select.is-disabled .el-input__inner { color: var(--c-text-3) !important; -webkit-text-fill-color: var(--c-text-3); }
-.editor-head .db-select.is-disabled .el-select__caret { color: var(--c-text-3) !important; }
 .editor-body { height: 200px; overflow: hidden; border-top: 1px solid var(--c-divider); }
 
 /* ================ 结果区 ================ */

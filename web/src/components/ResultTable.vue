@@ -165,14 +165,9 @@
       </el-table>
     </div>
     <div v-if="isEditable" class="table-footer">
-      <template v-if="!pkColumns.length">
-        <span style="color:#e6a23c">{{ t('table.noPk') }}</span>
-        <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.clickView') }}</span>
-      </template>
-      <template v-else>
-        <span style="color:var(--c-text-3)">{{ t('table.clickEdit') }}</span>
-        <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.total', { n: total }) }}{{ tab.kind === 'table' ? t('table.pageOf', { page, pages: totalPages }) : '' }}</span>
-      </template>
+      <span v-if="!pkColumns.length" style="color:#e6a23c">{{ t('table.noPk') }}</span>
+      <span v-else style="color:var(--c-text-3)">{{ t('table.clickEdit') }}</span>
+      <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.total', { n: total }) }}{{ tab.kind === 'table' ? t('table.pageOf', { page, pages: totalPages }) : '' }}</span>
     </div>
   </div>
 </template>
@@ -187,7 +182,7 @@ const props = defineProps({
   tab: { type: Object, required: true },
   connId: String
 });
-const emit = defineEmits(['export', 'rows-changed']);
+const emit = defineEmits(['export', 'rows-changed', 'total-known']);
 
 // 导出下拉命令分发：csv / sql
 function onExport(cmd) {
@@ -358,6 +353,11 @@ async function loadData() {
     rows.value = res.rows || [];
     columns.value = rows.value.length ? Object.keys(rows.value[0]) : fallbackColumns();
     total.value = res.total || 0;
+    // 以本次精确 COUNT 为准，通知父组件校准左侧树快照
+    // （左侧是展开库时的旧快照，performance_schema 汇总表/写入中的表会有瞬时差）
+    if (props.tab.database && props.tab.table && res.total != null) {
+      emit('total-known', { database: props.tab.database, table: props.tab.table, total: Number(res.total) });
+    }
     rawText.value = res.raw != null && res.raw !== ''
       ? String(res.raw)
       : rowsToRaw(rows.value, res.keyType || props.tab.redisType);

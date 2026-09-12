@@ -219,6 +219,7 @@
                   :conn-id="tab.connId || connection.id"
                   @export="exportTable"
                   @rows-changed="onRowsChanged"
+                  @total-known="onTotalKnown"
                 />
                 <structure-view
                   v-else
@@ -1156,6 +1157,18 @@ function onRowsChanged({ database, table, delta }) {
     const cur = node.data.rows;
     node.data.rows = (cur == null ? 0 : cur) + delta;
     if (node.data.rows < 0) node.data.rows = 0;
+  }
+}
+
+// 表打开/翻页后，用右侧精确总数覆盖左侧树快照
+// 左侧是展开库时的旧快照，performance_schema 汇总表/写入中的表会有跨时刻瞬时差，以打开时刻为准
+function onTotalKnown({ database, table, total }) {
+  if (!database || !table || total == null) return;
+  const tree = treeRef.value;
+  if (!tree) return;
+  const node = tree.getNode('tb:' + database + '.' + table);
+  if (node && node.data) {
+    node.data.rows = Number(total);
   }
 }
 
