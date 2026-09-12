@@ -28,6 +28,12 @@
       <div class="copyright">© 2026 NavCove · Powered by Vue 3 + Koa</div>
     </div>
     <div class="login-right">
+      <div class="login-lang">
+        <el-radio-group :model-value="locale" @change="onLangChange" size="small">
+          <el-radio-button value="zh-CN">简体中文</el-radio-button>
+          <el-radio-button value="en-US">English</el-radio-button>
+        </el-radio-group>
+      </div>
       <div class="login-box">
         <h2 class="login-title">{{ t('login.welcome') }}</h2>
         <p class="login-sub">{{ t('login.pleaseInput') }}</p>
@@ -421,7 +427,7 @@ import StructureView from './components/StructureView.vue';
 import TitleBar from './components/TitleBar.vue';
 import OperationLog from './components/OperationLog.vue';
 import SettingsDialog from './components/SettingsDialog.vue';
-import { t, elLocale, locale } from './i18n';
+import { t, elLocale, locale, setLocale } from './i18n';
 import zhCN from './i18n/zh-CN';
 import enUS from './i18n/en-US';
 import { checkAppUpdate } from './updateCheck';
@@ -439,6 +445,10 @@ const loginForm = reactive({ username: 'admin', password: '123456' });
 const loginLoading = ref(false);
 const userInitial = computed(() => (user.name || user.username || 'A').charAt(0).toUpperCase());
 const loginLogoSrc = '/icon.png';
+
+function onLangChange(lang) {
+  setLocale(lang);
+}
 
 async function handleLogin() {
   if (!loginForm.username || !loginForm.password) { ElMessage.warning(t('login.needAccount')); return; }
