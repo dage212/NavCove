@@ -1271,11 +1271,30 @@ async function runSql() {
   finally { loading.value = false; }
 }
 
+function tableTabLabel(database, table) {
+  if (database && table) return `${database}.${table}`;
+  return table || database || '';
+}
+
 function openResultTab(tab) {
+  tab.connId = tab.connId || connection.value.id;
+  if (tab.kind === 'table' && tab.database && tab.table) {
+    tab.label = tableTabLabel(tab.database, tab.table);
+    const existing = resultTabs.value.find((t) =>
+      t.kind === 'table'
+      && t.connId === tab.connId
+      && t.database === tab.database
+      && t.table === tab.table
+    );
+    if (existing) {
+      existing.label = tab.label;
+      activeTab.value = existing.id;
+      return;
+    }
+  }
   const id = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
   tab.id = id;
-  tab.connId = tab.connId || connection.value.id;
-  resultTabs.value = [tab];
+  resultTabs.value = [...resultTabs.value, tab];
   activeTab.value = id;
 }
 

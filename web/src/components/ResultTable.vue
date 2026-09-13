@@ -1,9 +1,7 @@
 <template>
   <div style="height:100%;display:flex;flex-direction:column;overflow:hidden;">
-    <!-- 只读工具栏（新增行按钮 + 分页） -->
+    <!-- 分页 / 新增 / 导出（不显示库名表名） -->
     <div v-if="isEditable" class="table-toolbar">
-      <span class="t-label">{{ tab.database }} . {{ tab.table }}</span>
-      <div style="flex:1"></div>
       <template v-if="isPaginated">
         <el-input-number v-model="page" :min="1" :max="totalPages" size="small" style="width:110px" @change="goPage(page)" />
         <span style="color:var(--c-text-3);font-size:12px">/ {{ t('table.pages', { n: totalPages }) }}</span>
@@ -53,7 +51,7 @@
       </template>
     </div>
 
-    <div v-else-if="tab.kind === 'write'" class="write-info">
+    <div v-if="tab.kind === 'write'" class="write-info">
       <el-result icon="success" :title="t('table.execOk')" :sub-title="t('table.affected', { n: tab.affected })">
         <template #extra>
           <el-descriptions :column="1" border size="small" style="margin-top:8px;max-width:360px">
@@ -780,10 +778,9 @@ async function confirmDelete(row, index) {
 
 <style scoped>
 .table-toolbar {
-  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 8px 14px;
   border-bottom: 1px solid var(--c-border); background: #fff; flex-shrink: 0;
 }
-.t-label { font-size: 13px; color: var(--c-text); font-weight: 600; }
 .table-wrap { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
 .raw-wrap { flex: 1; min-height: 0; overflow: auto; background: #F8FAFC; }
 .raw-view {
