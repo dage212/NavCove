@@ -225,20 +225,27 @@
                   <span>{{ tab.label }}</span>
                   <el-icon style="margin-left:4px;vertical-align:middle" @click.stop="closeTab(i)"><Close /></el-icon>
                 </template>
+                <structure-view
+                  v-if="tab.kind === 'structure-db' || tab.kind === 'structure-table'"
+                  :key="`${activeConnId}:${tab.id}`"
+                  :tab="tab"
+                  :conn-id="tab.connId || connection.id"
+                />
+                <relation-view
+                  v-else-if="tab.kind === 'relations'"
+                  :key="`${activeConnId}:${tab.id}`"
+                  :tab="tab"
+                  :conn-id="tab.connId || connection.id"
+                  @open-table="viewTableData"
+                />
                 <result-table
-                  v-if="tab.kind !== 'structure-db' && tab.kind !== 'structure-table'"
+                  v-else
                   :key="`${activeConnId}:${tab.id}`"
                   :tab="tab"
                   :conn-id="tab.connId || connection.id"
                   @export="exportTable"
                   @rows-changed="onRowsChanged"
                   @total-known="onTotalKnown"
-                />
-                <structure-view
-                  v-else
-                  :key="`${activeConnId}:${tab.id}`"
-                  :tab="tab"
-                  :conn-id="tab.connId || connection.id"
                 />
               </el-tab-pane>
             </el-tabs>
@@ -311,6 +318,9 @@
       <template v-else>
         <li class="ctx-item" @click="onCtxCommand('view-table-structure')">
           <el-icon><Menu /></el-icon><span>{{ t('ctx.viewTableStructure') }}</span>
+        </li>
+        <li class="ctx-item" @click="onCtxCommand('view-table-relations')">
+          <el-icon><Share /></el-icon><span>{{ t('ctx.viewTableRelations') }}</span>
         </li>
         <li class="ctx-divider"></li>
         <li class="ctx-item" @click="onCtxCommand('rename')">
@@ -438,6 +448,7 @@ import CreateTableDialog from './components/CreateTableDialog.vue';
 import CreateDatabaseDialog from './components/CreateDatabaseDialog.vue';
 import ExportSqlDialog from './components/ExportSqlDialog.vue';
 import StructureView from './components/StructureView.vue';
+import RelationView from './components/RelationView.vue';
 import TitleBar from './components/TitleBar.vue';
 import OperationLog from './components/OperationLog.vue';
 import SettingsDialog from './components/SettingsDialog.vue';
@@ -1668,8 +1679,25 @@ function openTableStructureTab(data) {
   }];
   activeTab.value = id;
 }
-
-// 右键菜单（数据库 / 表）
+function openTableRelationsTab(data) {
+  const database = data && data.database ? data.database : currentDb.value;
+  const table = data && data.name ? data.name : '';
+  if (!database || !table) { ElMessage.warning(t('structure.needTable')); return; }
+  currentDb.value = database;
+  currentTable.value = table;
+  const existing = resultTabs.value.find((t) => t.kind === 'relations' && t.database === database && t.table === table);
+  if (existing) { activeTab.value = existing.id; return; }
+  const id = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  resultTabs.value = [...resultTabs.value, {
+    id,
+    connId: connection.value.id,
+    kind: 'relations',
+    database,
+    table,
+    label: t('relation.tab', { name: `${database}.${table}` })
+  }];
+  activeTab.value = id;
+}
 const contextMenu = reactive({ visible: false, x: 0, y: 0, data: null, kind: 'table' });
 function onTreeContextMenu(data, e) {
   if (data.type !== 'table' && data.type !== 'database') return;
@@ -1696,6 +1724,7 @@ async function onCtxCommand(cmd) {
     case 'export-sql': openExportSqlTableDialog(data); break;
     case 'import-sql': handleImportSql(data); break;
     case 'view-table-structure': openTableStructureTab(data); break;
+    case 'view-table-relations': openTableRelationsTab(data); break;
     case 'create-redis-key': openRedisKeyDialog(data); break;
     case 'rename-redis-key': handleRenameTable(data); break;
     case 'rename': handleRenameTable(data); break;

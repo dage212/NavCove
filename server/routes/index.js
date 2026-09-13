@@ -389,6 +389,11 @@ router.get('/table/structure', async (ctx) => {
   ctx.body = ok(await svc.getTableStructure(connId, database, table));
 });
 
+router.get('/table/relations', async (ctx) => {
+  const { connId, database, table } = ctx.query;
+  ctx.body = ok(await useSvc(connId, 'getTableRelations', connId, database, table));
+});
+
 // --- SQL 执行 ---
 router.post('/query', async (ctx) => {
   const { connId, database, sql } = ctx.request.body || {};

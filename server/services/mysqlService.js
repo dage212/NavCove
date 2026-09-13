@@ -1538,6 +1538,128 @@ async function getTableStructure(connId, database, table) {
   return { createSql, columns, indexes: idxRows };
 }
 
+function groupFkRows(rows) {
+  const map = new Map();
+  for (const r of rows || []) {
+    const key = [r.constraintSchema, r.constraintName, r.tableSchema, r.tableName, r.refSchema, r.refTable].join('\0');
+    if (!map.has(key)) {
+      map.set(key, {
+        name: r.constraintName,
+        tableSchema: r.tableSchema,
+        tableName: r.tableName,
+        refSchema: r.refSchema,
+        refTable: r.refTable,
+        updateRule: r.updateRule || '',
+        deleteRule: r.deleteRule || '',
+        columns: [],
+        refColumns: []
+      });
+    }
+    const g = map.get(key);
+    g.columns.push(r.columnName);
+    g.refColumns.push(r.refColumn);
+  }
+  return Array.from(map.values()).map((g) => ({
+    ...g,
+    columnsText: g.columns.join(', '),
+    refColumnsText: g.refColumns.join(', ')
+  }));
+}
+
+async function getTableRelations(connId, database, table) {
+  const pool = poolMgr.getPool(connId);
+  const sql = `SELECT
+      k.CONSTRAINT_SCHEMA AS constraintSchema,
+      k.CONSTRAINT_NAME AS constraintName,
+      k.TABLE_SCHEMA AS tableSchema,
+      k.TABLE_NAME AS tableName,
+      k.COLUMN_NAME AS columnName,
+      k.ORDINAL_POSITION AS seq,
+      k.REFERENCED_TABLE_SCHEMA AS refSchema,
+      k.REFERENCED_TABLE_NAME AS refTable,
+      k.REFERENCED_COLUMN_NAME AS refColumn,
+      r.UPDATE_RULE AS updateRule,
+      r.DELETE_RULE AS deleteRule
+    FROM information_schema.KEY_COLUMN_USAGE k
+    LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+      ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+     AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+     AND r.TABLE_NAME = k.TABLE_NAME
+    WHERE k.REFERENCED_TABLE_NAME IS NOT NULL`;
+  const [outgoingRows] = await pool.query(
+    `${sql} AND k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ? ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION`,
+    [database, table]
+  );
+  const [incomingRows] = await pool.query(
+    `${sql} AND k.REFERENCED_TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME = ? ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION`,
+    [database, table]
+  );
+  const outgoing = groupFkRows(outgoingRows);
+  const incoming = groupFkRows(incomingRows);
+
+  const [schemaFkRows] = await pool.query(
+    `${sql} AND k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_SCHEMA = ? ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION`,
+    [database, database]
+  );
+  const allInDb = groupFkRows(schemaFkRows);
+  const nodeId = (schema, name) => `${schema}.${name}`;
+  const currentId = nodeId(database, table);
+  const vis = new Set([currentId]);
+  let frontier = new Set([currentId]);
+  for (let hop = 0; hop < 2; hop++) {
+    const next = new Set();
+    for (const fk of allInDb) {
+      const a = nodeId(fk.tableSchema, fk.tableName);
+      const b = nodeId(fk.refSchema, fk.refTable);
+      if (frontier.has(a) && !vis.has(b)) next.add(b);
+      if (frontier.has(b) && !vis.has(a)) next.add(a);
+    }
+    next.forEach((n) => vis.add(n));
+    frontier = next;
+  }
+  const graphEdges = allInDb.filter((fk) =>
+    vis.has(nodeId(fk.tableSchema, fk.tableName)) && vis.has(nodeId(fk.refSchema, fk.refTable))
+  );
+  const graphNodes = Array.from(vis).map((id) => {
+    const dot = id.indexOf('.');
+    return {
+      id,
+      database: id.slice(0, dot),
+      table: id.slice(dot + 1),
+      current: id === currentId,
+      columns: []
+    };
+  });
+  const tableNames = graphNodes.map((n) => n.table);
+  if (tableNames.length) {
+    const ph = tableNames.map(() => '?').join(', ');
+    const [colRows] = await pool.query(
+      `SELECT TABLE_NAME AS tableName, COLUMN_NAME AS name, COLUMN_KEY AS colKey, COLUMN_TYPE AS colType
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (${ph})
+       ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+      [database, ...tableNames]
+    );
+    const byTable = {};
+    for (const r of colRows || []) {
+      (byTable[r.tableName] || (byTable[r.tableName] = [])).push({
+        name: r.name,
+        key: r.colKey || '',
+        type: r.colType || ''
+      });
+    }
+    for (const n of graphNodes) n.columns = byTable[n.table] || [];
+  }
+
+  return {
+    database,
+    table,
+    outgoing,
+    incoming,
+    graph: { nodes: graphNodes, edges: graphEdges }
+  };
+}
+
 module.exports = {
   testConnection,
   listDatabases,
@@ -1567,6 +1689,7 @@ module.exports = {
   getDatabaseInfo,
   getDatabaseStructure,
   getTableStructure,
+  getTableRelations,
   getColumnIndexes,
   exportTableSqlStream,
   exportDatabaseSqlStream

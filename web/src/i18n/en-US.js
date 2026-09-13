@@ -146,6 +146,7 @@ export default {
     exportSql: 'Export SQL',
     importSql: 'Import SQL',
     viewTableStructure: 'View table structure',
+    viewTableRelations: 'View table relations',
     copyTable: 'Copy table',
     truncateTable: 'Truncate table',
     dropTable: 'Drop table'
@@ -264,6 +265,26 @@ export default {
     tableTab: 'Table structure: {name}',
     needDb: 'No database selected',
     needTable: 'No table selected'
+  },
+  relation: {
+    tag: 'Relations',
+    tab: 'Relations: {name}',
+    outgoing: 'This table references',
+    incoming: 'Referenced by',
+    outCount: 'Outgoing ',
+    inCount: 'Incoming ',
+    self: 'self',
+    none: 'None',
+    fkName: 'Foreign key',
+    localCols: 'Columns',
+    refTable: 'References',
+    fromTable: 'From table',
+    refCols: 'Referenced columns',
+    onUpdate: 'ON UPDATE',
+    onDelete: 'ON DELETE',
+    loadFail: 'Failed to load relations: {message}',
+    chart: 'Graph',
+    chartHint: 'Drag empty space to pan; drag a table to move it'
   },
   log: {
     tab: 'Activity log',

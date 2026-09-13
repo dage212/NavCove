@@ -90,6 +90,8 @@ export const api = {
     http.get('/database/structure', { params: { connId, database } }),
   getTableStructure: (connId, database, table) =>
     http.get('/table/structure', { params: { connId, database, table } }),
+  getTableRelations: (connId, database, table) =>
+    http.get('/table/relations', { params: { connId, database, table } }),
   // 查询
   query: (connId, database, sql, config) => http.post('/query', { connId, database, sql }, config),
   // 导入导出

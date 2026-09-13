@@ -146,6 +146,7 @@ export default {
     exportSql: '导出 SQL',
     importSql: '导入 SQL',
     viewTableStructure: '查看表结构',
+    viewTableRelations: '查看表关系',
     copyTable: '复制表',
     truncateTable: '清空表',
     dropTable: '删除表'
@@ -264,6 +265,26 @@ export default {
     tableTab: '表结构：{name}',
     needDb: '未选择数据库',
     needTable: '未选择表'
+  },
+  relation: {
+    tag: '表关系',
+    tab: '表关系：{name}',
+    outgoing: '本表引用',
+    incoming: '引用本表',
+    outCount: '引用 ',
+    inCount: '被引用 ',
+    self: '自关联',
+    none: '无',
+    fkName: '外键名',
+    localCols: '本表列',
+    refTable: '引用表',
+    fromTable: '来源表',
+    refCols: '引用列',
+    onUpdate: 'ON UPDATE',
+    onDelete: 'ON DELETE',
+    loadFail: '加载表关系失败：{message}',
+    chart: '关系图',
+    chartHint: '空白处拖动平移画布，拖动表移动卡片；连线从字段连到关联字段'
   },
   log: {
     tab: '操作日志',
