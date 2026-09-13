@@ -35,7 +35,15 @@
 
     <!-- 表格 -->
     <div class="oplog-table">
-      <el-table :data="rows" border stripe size="small" height="100%" @row-dblclick="onRowDbl">
+      <el-table
+        :data="rows"
+        border
+        stripe
+        size="small"
+        height="100%"
+        :tooltip-options="sqlTipOptions"
+        @row-dblclick="onRowDbl"
+      >
         <el-table-column prop="created_at" :label="t('log.time')" width="160" fixed />
         <el-table-column prop="username" :label="t('log.operator')" width="100" />
         <el-table-column prop="database" :label="t('log.database')" width="120" show-overflow-tooltip />
@@ -44,7 +52,12 @@
             <el-tag :type="typeTag(row.sql_type)" size="small">{{ row.sql_type }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="sql_text" :label="t('log.sql')" min-width="320" show-overflow-tooltip />
+        <el-table-column
+          prop="sql_text"
+          :label="t('log.sql')"
+          min-width="320"
+          :show-overflow-tooltip="sqlTipOptions"
+        />
         <el-table-column prop="affected" :label="t('log.affected')" width="90" align="right" />
         <el-table-column prop="status" :label="t('log.status')" width="80" fixed="right">
           <template #default="{ row }">
@@ -102,6 +115,11 @@ const stats = ref([]);
 const users = ref([]);
 const detailVisible = ref(false);
 const curRow = ref(null);
+const sqlTipOptions = {
+  popperClass: 'oplog-overflow-tip',
+  placement: 'top',
+  showAfter: 300
+};
 
 // 下拉选项：Select/Insert/Update/Delete/Alter/非Select 等
 const typeOptions = computed(() => [
@@ -169,4 +187,17 @@ onMounted(() => { loadUsers(); load(); });
 .oplog-table { flex:1; min-height:0; overflow:hidden; padding:0 14px; }
 .oplog-pager { display:flex; justify-content:flex-end; padding:8px 14px; border-top:1px solid var(--c-border,#E5E7EB); flex-shrink:0; }
 .oplog-sql-detail { background:#0d1117; color:#c9d1d3; padding:12px 16px; border-radius:6px; font-size:13px; line-height:1.6; white-space:pre-wrap; word-break:break-all; margin-top:12px; max-height:360px; overflow:auto; }
+</style>
+<style>
+.oplog-overflow-tip {
+  max-width: 60vw !important;
+  width: auto !important;
+}
+.oplog-overflow-tip .el-tooltip__content,
+.oplog-overflow-tip .el-popper__content {
+  max-width: 60vw;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
 </style>
