@@ -124,10 +124,28 @@ body {
 }
 .conn-tab-add {
   align-self: center;
-  margin: 0 6px;
-  color: var(--c-text-3) !important;
+  margin: 0 8px;
+  width: 22px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  padding: 0 !important;
+  color: #fff !important;
+  background: var(--c-primary) !important;
+  border-radius: 4px;
 }
-.conn-tab-add:hover { color: var(--c-primary) !important; }
+.conn-tab-add .el-icon {
+  font-size: 13px;
+}
+.conn-tab-add svg path {
+  stroke: currentColor;
+  stroke-width: 40;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+.conn-tab-add:hover {
+  color: #fff !important;
+  background: var(--c-primary-dark) !important;
+}
 
 .conn-tabs-empty {
   height: 38px;
