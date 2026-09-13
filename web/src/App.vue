@@ -1588,14 +1588,16 @@ function openDbStructureTab(data) {
   const database = (data && data.name) || currentDb.value;
   if (!database) { ElMessage.warning(t('structure.needDb')); return; }
   currentDb.value = database;
-  const id = 'tab_' + Date.now();
-  const tab = {
+  const existing = resultTabs.value.find((t) => t.kind === 'structure-db' && t.database === database);
+  if (existing) { activeTab.value = existing.id; return; }
+  const id = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  resultTabs.value = [...resultTabs.value, {
     id,
+    connId: connection.value.id,
     kind: 'structure-db',
     database,
     label: t('structure.dbTab', { name: database })
-  };
-  resultTabs.value = [tab];
+  }];
   activeTab.value = id;
 }
 function openTableStructureTab(data) {
@@ -1604,15 +1606,17 @@ function openTableStructureTab(data) {
   if (!database || !table) { ElMessage.warning(t('structure.needTable')); return; }
   currentDb.value = database;
   currentTable.value = table;
-  const id = 'tab_' + Date.now();
-  const tab = {
+  const existing = resultTabs.value.find((t) => t.kind === 'structure-table' && t.database === database && t.table === table);
+  if (existing) { activeTab.value = existing.id; return; }
+  const id = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  resultTabs.value = [...resultTabs.value, {
     id,
+    connId: connection.value.id,
     kind: 'structure-table',
     database,
     table,
     label: t('structure.tableTab', { name: table })
-  };
-  resultTabs.value = [tab];
+  }];
   activeTab.value = id;
 }
 

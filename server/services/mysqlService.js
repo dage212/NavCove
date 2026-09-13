@@ -173,7 +173,7 @@ async function getTableData(connId, database, table, { page = 1, size = 50, orde
   sql += ` LIMIT ? OFFSET ?`;
   params.push(Number(size), Number(offset));
   const [rows] = await pool.query(sql, params);
-  return { total, page: Number(page), size: Number(size), rows };
+  return { total, page: Number(page), size: Number(size), rows: serializeRows(rows) };
 }
 
 // 执行任意 SQL（支持多语句，返回结构化结果）
@@ -195,7 +195,7 @@ async function executeSql(connId, database, sql) {
         const [res] = await conn.query(trimmed);
         if (Array.isArray(res)) {
           // SELECT
-          results.push({ type: 'select', rows: res, affected: res.length, fields: extractFields(res) });
+          results.push({ type: 'select', rows: serializeRows(res), affected: res.length, fields: extractFields(res) });
         } else {
           // 写操作
           results.push({
@@ -1145,6 +1145,39 @@ function splitSql(sql) {
 function extractFields(rows) {
   if (!rows || !rows.length) return [];
   return Object.keys(rows[0]);
+}
+
+function bufferToNumberString(bytes) {
+  if (!bytes || !bytes.length) return '';
+  if (bytes.length > 8) return '0x' + Buffer.from(bytes).toString('hex');
+  let n = 0n;
+  for (let i = 0; i < bytes.length; i++) n = (n << 8n) + BigInt(bytes[i]);
+  return n.toString();
+}
+
+function serializeCell(v) {
+  if (v == null) return v;
+  if (typeof v === 'bigint') return v.toString();
+  if (Buffer.isBuffer(v)) return bufferToNumberString(v);
+  if (typeof v === 'object') {
+    if (v.type === 'Buffer' && Array.isArray(v.data)) return bufferToNumberString(v.data);
+    if (typeof v.toJSON === 'function') {
+      const j = v.toJSON();
+      if (typeof j !== 'object' || j == null) return j;
+    }
+    try { return JSON.stringify(v); } catch (e) { return String(v); }
+  }
+  return v;
+}
+
+function serializeRows(rows) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+    const out = {};
+    for (const k of Object.keys(row)) out[k] = serializeCell(row[k]);
+    return out;
+  });
 }
 
 function rowsToCsv(rows) {

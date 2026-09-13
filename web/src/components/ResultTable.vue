@@ -476,10 +476,30 @@ function isListIndexCell(row, col) {
 const COL_MAX_WHEN_MANY = 500;
 const manyColumns = computed(() => columns.value.length > 6);
 
+function formatCellValue(v) {
+  if (v == null) return 'NULL';
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'bigint') return v.toString();
+  if (v && typeof v === 'object') {
+    if (v.type === 'Buffer' && Array.isArray(v.data)) {
+      const bytes = v.data;
+      if (!bytes.length) return '';
+      if (bytes.length <= 8) {
+        let n = 0;
+        for (let i = 0; i < bytes.length; i++) n = n * 256 + bytes[i];
+        return String(n);
+      }
+      return '0x' + bytes.map((b) => Number(b).toString(16).padStart(2, '0')).join('');
+    }
+    try { return JSON.stringify(v); } catch (e) { return String(v); }
+  }
+  return String(v);
+}
+
 function colNaturalWidth(col) {
   if (isListIndexCell(newRow.value, col)) return 120;
   const samples = [...rows.value, newRow.value].filter(Boolean);
-  const base = Math.max(...samples.map((r) => String(r[col] == null ? '' : r[col]).length), String(col).length);
+  const base = Math.max(...samples.map((r) => formatCellValue(r[col]).length), String(col).length);
   return Math.max(base * 9 + 24, 90);
 }
 
@@ -493,7 +513,7 @@ function colWidth(col) {
 }
 
 function cellText(row, col) {
-  return row[col] == null ? 'NULL' : String(row[col]);
+  return formatCellValue(row[col]);
 }
 
 function showCellTip(row, col) {
