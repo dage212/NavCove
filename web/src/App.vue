@@ -1299,9 +1299,17 @@ function openResultTab(tab) {
 }
 
 function closeTab(i) {
+  const closingId = resultTabs.value[i]?.id;
+  const wasActive = activeTab.value === closingId;
   resultTabs.value.splice(i, 1);
-  if (!resultTabs.value.length) activeTab.value = '';
-  else if (activeTab.value === resultTabs.value[i]?.id) activeTab.value = resultTabs.value[Math.max(0, i - 1)].id;
+  if (!resultTabs.value.length) {
+    activeTab.value = '';
+    return;
+  }
+  if (wasActive) {
+    const next = resultTabs.value[i] || resultTabs.value[i - 1];
+    activeTab.value = next.id;
+  }
 }
 
 function clearSql() { if (cmInstance) cmInstance.setValue(''); }
