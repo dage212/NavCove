@@ -701,18 +701,24 @@ function initEditor() {
 const sqlHintCache = new Map();
 let sqlHintTimer = null;
 
+function editorDb() {
+  return databaseSelect.value || '';
+}
+
 function sqlHintCacheKey() {
   const conn = connection.value;
-  if (!conn || !conn.id || !currentDb.value) return '';
-  return `${conn.id}:${currentDb.value}`;
+  const db = editorDb();
+  if (!conn || !conn.id || !db) return '';
+  return `${conn.id}:${db}`;
 }
 
 function applySqlHintOptions() {
   if (!cmInstance) return;
   const cached = sqlHintCache.get(sqlHintCacheKey()) || {};
+  const sameDb = currentDb.value && currentDb.value === editorDb();
   cmInstance.setOption('hintOptions', {
     completeSingle: false,
-    defaultTable: currentTable.value || undefined,
+    defaultTable: (sameDb && currentTable.value) ? currentTable.value : undefined,
     tables: cached
   });
 }
@@ -720,14 +726,15 @@ function applySqlHintOptions() {
 async function refreshSqlHintSchema() {
   applySqlHintOptions();
   const conn = connection.value;
-  if (!cmInstance || !conn || !currentDb.value) return;
+  const db = editorDb();
+  if (!cmInstance || !conn || !db) return;
   if (conn.type === 'redis') {
     await refreshRedisHintKeys();
     return;
   }
   const key = sqlHintCacheKey();
   try {
-    const tables = await api.listTables(conn.id, currentDb.value);
+    const tables = await api.listTables(conn.id, db);
     if (sqlHintCacheKey() !== key) return;
     const prev = sqlHintCache.get(key) || {};
     const next = {};
@@ -738,7 +745,7 @@ async function refreshSqlHintSchema() {
     }
     sqlHintCache.set(key, next);
     applySqlHintOptions();
-    if (currentTable.value) ensureTableColumns(currentTable.value);
+    if (currentTable.value && currentDb.value === db) ensureTableColumns(currentTable.value);
   } catch (e) {}
 }
 
@@ -765,7 +772,7 @@ async function refreshRedisHintKeys() {
   const key = sqlHintCacheKey();
   if (!conn || !key) return;
   try {
-    const tables = await api.listTables(conn.id, currentDb.value);
+    const tables = await api.listTables(conn.id, editorDb());
     if (sqlHintCacheKey() !== key) return;
     redisHintCache.set(key, (tables || []).map((t) => (t && typeof t === 'object' ? t.name : t)).filter(Boolean));
     for (const k of [...redisHintDetail.keys()]) {
@@ -807,7 +814,7 @@ async function ensureRedisKeyHint(redisKey) {
   if (redisHintDetailPending.has(cacheKey)) return redisHintDetailPending.get(cacheKey);
   const pending = (async () => {
     try {
-      const res = await api.tableData(conn.id, currentDb.value, redisKey, { page: 1, size: 200 });
+      const res = await api.tableData(conn.id, editorDb(), redisKey, { page: 1, size: 200 });
       const type = res && res.keyType ? String(res.keyType) : '';
       const rows = (res && res.rows) || [];
       let items = [];
@@ -880,7 +887,7 @@ async function ensureTableColumns(table) {
   }
   if (Array.isArray(schema[table]) && schema[table].length) return;
   try {
-    const cols = await api.tableColumns(conn.id, currentDb.value, table);
+    const cols = await api.tableColumns(conn.id, editorDb(), table);
     if (sqlHintCacheKey() !== key) return;
     schema[table] = (cols || []).map((c) => c.Field || c.name || c).filter(Boolean);
     applySqlHintOptions();
@@ -940,8 +947,10 @@ watch(locale, () => {
   const hints = [zhCN.editor.hintSql, zhCN.editor.hintRedis, enUS.editor.hintSql, enUS.editor.hintRedis];
   if (hints.includes(cur)) cmInstance.setValue(editorHint(connection.value));
 });
-watch([currentDb, activeConnId], () => { refreshSqlHintSchema(); });
-watch(currentTable, (name) => { if (name) ensureTableColumns(name); });
+watch([databaseSelect, activeConnId], () => { refreshSqlHintSchema(); });
+watch(currentTable, (name) => {
+  if (name && currentDb.value === editorDb()) ensureTableColumns(name);
+});
 
 function openConnDialog() { connDialogVisible.value = true; }
 
@@ -1099,10 +1108,7 @@ async function loadNode(node, resolve) {
 function onNodeClick(data) {
   if (data.connId && data.connId !== activeConnId.value) return;
   if (data.type === 'database') {
-    // 点击库节点时同步切换当前页签选中的库（下拉框 + 状态），保证查询落在当前页签的库上。
     currentDb.value = data.name;
-    databaseSelect.value = data.name;
-    if (curConn.value) curConn.value.databaseSelect = data.name;
     currentTable.value = '';
   } else if (data.type === 'table') {
     currentDb.value = data.database;
@@ -1112,17 +1118,12 @@ function onNodeClick(data) {
 }
 
 function onDbChange(val) {
-  if (curConn.value) {
-    curConn.value.databaseSelect = val || '';
-    curConn.value.currentDb = val || '';
-  }
+  if (curConn.value) curConn.value.databaseSelect = val || '';
   if (val) ElMessage.success({ message: isRedis.value ? t('result.switchedRedis', { name: val }) : t('result.switchedDb', { name: val }), duration: 1500 });
 }
 
 async function viewTableData(data) {
   currentDb.value = data.database;
-  databaseSelect.value = data.database;
-  if (curConn.value) curConn.value.databaseSelect = data.database;
   currentTable.value = data.name;
   if (connection.value.type === 'redis') {
     try {
@@ -1485,7 +1486,6 @@ function onTableCreated(payload) {
   // 如果能识别出新建的表名，自动打开它的数据 Tab
   if (table) {
     currentDb.value = db;
-    databaseSelect.value = db;
     currentTable.value = table;
     openResultTab({
       kind: 'table', connId: connection.value.id, database: db, table, label: table
@@ -1686,6 +1686,10 @@ async function doDropDatabase(data) {
     resultTabs.value = resultTabs.value.filter((t) => t.database !== data.name);
     if (!resultTabs.value.find((t) => t.id === activeTab.value)) activeTab.value = resultTabs.value[0]?.id || '';
     if (currentDb.value === data.name) { currentDb.value = ''; currentTable.value = ''; }
+    if (databaseSelect.value === data.name) {
+      databaseSelect.value = '';
+      if (curConn.value) curConn.value.databaseSelect = '';
+    }
     refreshTree();
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return;
