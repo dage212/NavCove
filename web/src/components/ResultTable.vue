@@ -84,17 +84,27 @@
           :key="col"
           :prop="col"
           :label="col"
+          :width="isCappedCol(col) ? COL_MAX_WHEN_MANY : undefined"
           :min-width="colWidth(col)"
-          show-overflow-tooltip
+          :class-name="isCappedCol(col) ? 'col-data col-capped' : 'col-data'"
+          :label-class-name="isCappedCol(col) ? 'col-data col-capped' : 'col-data'"
           sortable="custom"
         >
           <template #header>
-            <div class="col-head">
-              {{ col }}
-              <span v-if="!isRedis && isPk(col)" class="pk-badge" :title="t('table.pk')">PK</span>
-              <span v-else-if="!isRedis && indexLabelOf(col)" :class="indexClsOf(col)" :title="indexTitleOf(col)">{{ indexLabelOf(col) }}</span>
-              <span v-if="colNull(col)" class="null-mark" :title="t('table.nullable')">?</span>
-            </div>
+            <el-tooltip
+              :content="col"
+              :disabled="!showColHeadTip(col)"
+              placement="top"
+              :show-after="400"
+              popper-class="result-cell-tip"
+            >
+              <div class="col-head">
+                <span class="col-head-name">{{ col }}</span>
+                <span v-if="!isRedis && isPk(col)" class="pk-badge" :title="t('table.pk')">PK</span>
+                <span v-else-if="!isRedis && indexLabelOf(col)" :class="indexClsOf(col)" :title="indexTitleOf(col)">{{ indexLabelOf(col) }}</span>
+                <span v-if="colNull(col)" class="null-mark" :title="t('table.nullable')">?</span>
+              </div>
+            </el-tooltip>
           </template>
           <template #default="{ row }">
             <template v-if="isListIndexCell(row, col)">
@@ -132,13 +142,21 @@
             </template>
             <!-- 普通显示（点击可编辑） -->
             <template v-else>
-              <div
-                class="cell-view"
-                :class="{ 'is-null': row[col] == null, 'is-pk': isPk(col), 'editable': canEdit(row, col) }"
-                @click="onCellClick(row, col)"
+              <el-tooltip
+                :content="cellText(row, col)"
+                :disabled="!showCellTip(row, col)"
+                placement="top"
+                :show-after="400"
+                popper-class="result-cell-tip"
               >
-                {{ row[col] == null ? 'NULL' : row[col] }}
-              </div>
+                <div
+                  class="cell-view"
+                  :class="{ 'is-null': row[col] == null, 'is-pk': isPk(col), 'editable': canEdit(row, col) }"
+                  @click="onCellClick(row, col)"
+                >
+                  {{ cellText(row, col) }}
+                </div>
+              </el-tooltip>
             </template>
           </template>
         </el-table-column>
@@ -455,11 +473,35 @@ function isListIndexCell(row, col) {
   return !!(row && row._isNew && isRedis.value && props.tab.redisType === 'list' && col === 'index');
 }
 
-function colWidth(col) {
+const COL_MAX_WHEN_MANY = 500;
+const manyColumns = computed(() => columns.value.length > 6);
+
+function colNaturalWidth(col) {
   if (isListIndexCell(newRow.value, col)) return 120;
   const samples = [...rows.value, newRow.value].filter(Boolean);
-  const base = Math.max(...samples.map((r) => String(r[col] == null ? '' : r[col]).length), col.length);
+  const base = Math.max(...samples.map((r) => String(r[col] == null ? '' : r[col]).length), String(col).length);
   return Math.max(base * 9 + 24, 90);
+}
+
+function isCappedCol(col) {
+  return manyColumns.value && colNaturalWidth(col) > COL_MAX_WHEN_MANY;
+}
+
+function colWidth(col) {
+  const w = colNaturalWidth(col);
+  return isCappedCol(col) ? COL_MAX_WHEN_MANY : w;
+}
+
+function cellText(row, col) {
+  return row[col] == null ? 'NULL' : String(row[col]);
+}
+
+function showCellTip(row, col) {
+  return cellText(row, col).length * 8 + 24 > colWidth(col);
+}
+
+function showColHeadTip(col) {
+  return String(col).length * 8 + 40 > colWidth(col);
 }
 function rowClass({ row }) {
   if (row._isNew) return 'row-new';
@@ -716,7 +758,8 @@ async function confirmDelete(row, index) {
   color: var(--c-text-3); font-size: 12px; background: #fff;
   flex-shrink: 0; display: flex; align-items: center; gap: 14px;
 }
-.col-head { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.col-head { font-size: 12px; display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.col-head-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pk-badge { background: var(--c-primary); color: #fff; font-size: 9px; padding: 0 4px; border-radius: 2px; line-height: 14px; font-weight: 600; }
 .idx-badge { background: #8b5cf6; color: #fff; font-size: 9px; padding: 0 4px; border-radius: 2px; line-height: 14px; font-weight: 600; }
 .ft-badge { background: #0ea5e9; }
@@ -726,9 +769,24 @@ async function confirmDelete(row, index) {
 :deep(.null-cell) { color: var(--c-text-3); font-style: italic; }
 .write-info { flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 20px; }
 :deep(.el-table .cell) { padding: 0 8px; }
+:deep(.data-table th.col-capped),
+:deep(.data-table td.col-capped) {
+  max-width: 500px;
+}
+:deep(.data-table .col-data > .cell) {
+  overflow: hidden;
+}
+:deep(.data-table .col-data .el-tooltip__trigger) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
 
 /* 单元格查看态：可点击样式 */
 .cell-view {
+  width: 100%;
+  min-width: 0;
   min-height: 28px; line-height: 28px; padding: 0 2px;
   border-radius: 2px; transition: background .15s ease, box-shadow .15s ease;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -816,5 +874,13 @@ async function confirmDelete(row, index) {
 :deep(.el-table tr.row-new:hover > td.el-table__cell),
 :deep(.el-table tr.row-new:hover > td) {
   background: #E8F3FF !important;
+}
+</style>
+<style>
+.result-cell-tip {
+  max-width: 520px !important;
+  word-break: break-all;
+  white-space: pre-wrap;
+  line-height: 1.45;
 }
 </style>
