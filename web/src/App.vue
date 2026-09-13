@@ -975,6 +975,20 @@ watch(editorRef, (el) => {
   }
 });
 watch(locale, () => {
+  for (const tab of connTabs.value) {
+    tab.resultTabs = (tab.resultTabs || []).map((item) => {
+      if (item.kind === 'relations' && item.database && item.table) {
+        return { ...item, label: t('relation.tab', { name: `${item.database}.${item.table}` }) };
+      }
+      if (item.kind === 'structure-db' && item.database) {
+        return { ...item, label: t('structure.dbTab', { name: item.database }) };
+      }
+      if (item.kind === 'structure-table' && item.table) {
+        return { ...item, label: t('structure.tableTab', { name: item.table }) };
+      }
+      return item;
+    });
+  }
   if (!cmInstance) return;
   const cur = cmInstance.getValue();
   const hints = [zhCN.editor.hintSql, zhCN.editor.hintRedis, enUS.editor.hintSql, enUS.editor.hintRedis];

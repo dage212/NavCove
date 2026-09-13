@@ -283,8 +283,9 @@ export default {
     onUpdate: 'ON UPDATE',
     onDelete: 'ON DELETE',
     loadFail: 'Failed to load relations: {message}',
-    chart: 'Graph',
-    chartHint: 'Drag empty space to pan; drag a table to move it'
+    empty: 'This table has no foreign keys',
+    chart: 'Relation diagram',
+    chartHint: 'Drag empty space to pan the canvas; drag a table to move it. Lines connect matching fields.'
   },
   log: {
     tab: 'Activity log',

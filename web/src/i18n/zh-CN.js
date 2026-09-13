@@ -283,6 +283,7 @@ export default {
     onUpdate: 'ON UPDATE',
     onDelete: 'ON DELETE',
     loadFail: '加载表关系失败：{message}',
+    empty: '该表没有外键关系',
     chart: '关系图',
     chartHint: '空白处拖动平移画布，拖动表移动卡片；连线从字段连到关联字段'
   },
