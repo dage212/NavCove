@@ -203,6 +203,7 @@ export default {
     cancelAdd: 'Discard add',
     confirm: 'OK',
     noPk: '⚠ This table has no primary key, so row edit / add / delete is disabled',
+    noPkHint: 'No primary key: rows are matched by all columns; duplicates affect one row only',
     clickView: 'Click a cell to view',
     clickEdit: 'Click a cell to edit. For a new row, fill the fields and click OK.',
     total: '{n} records',

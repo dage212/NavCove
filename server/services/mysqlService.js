@@ -1224,29 +1224,27 @@ async function saveTable(connId, database, table, changes) {
     }
     for (const upd of updates) {
       const setCols = Object.keys(upd.values || {});
-      const pkCols = Object.keys(upd.pk || {});
-      if (!setCols.length || !pkCols.length) continue;
+      if (!setCols.length) continue;
+      let where;
+      try { where = buildRowWhere(upd.pk); } catch { continue; }
       const setSql = setCols.map((c) => `${mysqlEscapeId(c)} = ?`).join(', ');
-      const whereSql = pkCols.map((c) => `${mysqlEscapeId(c)} = ?`).join(' AND ');
-      const params = setCols.map((c) => normalizeVal(upd.values[c]))
-        .concat(pkCols.map((c) => normalizeVal(upd.pk[c])));
+      const params = setCols.map((c) => normalizeVal(upd.values[c])).concat(where.params);
       const [r] = await conn.query(
-        `UPDATE ${quotedDb}.${quotedTable} SET ${setSql} WHERE ${whereSql}`,
+        `UPDATE ${quotedDb}.${quotedTable} SET ${setSql} WHERE ${where.whereSql} LIMIT 1`,
         params
       );
       updated += r.affectedRows;
-      sqls.push(`UPDATE ${quotedDb}.${quotedTable} SET ${setCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(normalizeVal(upd.values[c]))}`).join(', ')} WHERE ${pkCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(upd.pk[c])}`).join(' AND ')}`);
+      sqls.push(`UPDATE ${quotedDb}.${quotedTable} SET ${setCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(normalizeVal(upd.values[c]))}`).join(', ')} WHERE ${where.whereFull} LIMIT 1`);
     }
     for (const del of deletes) {
-      const pkCols = Object.keys(del.pk || {});
-      if (!pkCols.length) continue;
-      const whereSql = pkCols.map((c) => `${mysqlEscapeId(c)} = ?`).join(' AND ');
+      let where;
+      try { where = buildRowWhere(del.pk); } catch { continue; }
       const [r] = await conn.query(
-        `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${whereSql}`,
-        pkCols.map((c) => normalizeVal(del.pk[c]))
+        `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${where.whereSql} LIMIT 1`,
+        where.params
       );
       deleted += r.affectedRows;
-      sqls.push(`DELETE FROM ${quotedDb}.${quotedTable} WHERE ${pkCols.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(del.pk[c])}`).join(' AND ')}`);
+      sqls.push(`DELETE FROM ${quotedDb}.${quotedTable} WHERE ${where.whereFull} LIMIT 1`);
     }
     await conn.commit();
     return { inserted, updated, deleted, sql: sqls.join('; ') };
@@ -1293,24 +1291,42 @@ function normalizeDate(v) {
   return v;
 }
 
-// 单条 UPDATE（按主键条件，values 是字段名→值）
+/** 按主键或整行值定位一行；NULL 用 IS NULL；始终配合 LIMIT 1 */
+function buildRowWhere(locator) {
+  const clauses = [];
+  const params = [];
+  const fullParts = [];
+  for (const [col, raw] of Object.entries(locator || {})) {
+    if (!col || col.startsWith('_')) continue;
+    const v = normalizeVal(raw);
+    const id = mysqlEscapeId(col);
+    if (v === null) {
+      clauses.push(`${id} IS NULL`);
+      fullParts.push(`${id} IS NULL`);
+    } else {
+      clauses.push(`${id} = ?`);
+      params.push(v);
+      fullParts.push(`${id} = ${sqlStringLiteral(v)}`);
+    }
+  }
+  if (!clauses.length) throw new Error('无法定位行：定位条件为空');
+  return { whereSql: clauses.join(' AND '), params, whereFull: fullParts.join(' AND ') };
+}
+
+// 单条 UPDATE（有主键按主键，无主键按整行值；values 是字段名→值）
 async function updateRow(connId, database, table, pk, values) {
   const pool = poolMgr.getPool(connId);
   const quotedDb = mysqlEscapeId(database);
   const quotedTable = mysqlEscapeId(table);
-  const pkKeys = Object.keys(pk || {});
   const valueKeys = Object.keys(values || {});
-  if (!pkKeys.length) throw new Error('主键不能为空，无法定位更新的行');
   if (!valueKeys.length) return { updated: 0, sql: '' };
+  const where = buildRowWhere(pk);
   const setSql = valueKeys.map((c) => `${mysqlEscapeId(c)} = ?`).join(', ');
-  const whereSql = pkKeys.map((c) => `${mysqlEscapeId(c)} = ?`).join(' AND ');
-  const sql = `UPDATE ${quotedDb}.${quotedTable} SET ${setSql} WHERE ${whereSql} LIMIT 1`;
-  const params = [...valueKeys.map((c) => normalizeVal(values[c])), ...pkKeys.map((c) => pk[c])];
+  const sql = `UPDATE ${quotedDb}.${quotedTable} SET ${setSql} WHERE ${where.whereSql} LIMIT 1`;
+  const params = [...valueKeys.map((c) => normalizeVal(values[c])), ...where.params];
   const [res] = await pool.query(sql, params);
-  // 拼接带实际值的完整 SQL（用于审计日志）
   const setFull = valueKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(normalizeVal(values[c]))}`).join(', ');
-  const whereFull = pkKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(pk[c])}`).join(' AND ');
-  const fullSql = `UPDATE ${quotedDb}.${quotedTable} SET ${setFull} WHERE ${whereFull} LIMIT 1`;
+  const fullSql = `UPDATE ${quotedDb}.${quotedTable} SET ${setFull} WHERE ${where.whereFull} LIMIT 1`;
   return { updated: res.affectedRows || 0, sql: fullSql };
 }
 
@@ -1332,20 +1348,15 @@ async function insertRow(connId, database, table, values) {
   return { inserted: res.affectedRows || 0, insertId: res.insertId, sql: fullSql };
 }
 
-// 单条 DELETE（按主键条件）
+// 单条 DELETE（有主键按主键，无主键按整行值）
 async function deleteRow(connId, database, table, pk) {
   const pool = poolMgr.getPool(connId);
   const quotedDb = mysqlEscapeId(database);
   const quotedTable = mysqlEscapeId(table);
-  const pkKeys = Object.keys(pk || {});
-  if (!pkKeys.length) throw new Error('主键不能为空，无法定位删除的行');
-  const whereSql = pkKeys.map((c) => `${mysqlEscapeId(c)} = ?`).join(' AND ');
-  const sql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${whereSql} LIMIT 1`;
-  const params = pkKeys.map((c) => pk[c]);
-  const [res] = await pool.query(sql, params);
-  // 拼接带实际值的完整 SQL（用于审计日志）
-  const whereFull = pkKeys.map((c) => `${mysqlEscapeId(c)} = ${sqlStringLiteral(pk[c])}`).join(' AND ');
-  const fullSql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${whereFull} LIMIT 1`;
+  const where = buildRowWhere(pk);
+  const sql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${where.whereSql} LIMIT 1`;
+  const [res] = await pool.query(sql, where.params);
+  const fullSql = `DELETE FROM ${quotedDb}.${quotedTable} WHERE ${where.whereFull} LIMIT 1`;
   return { deleted: res.affectedRows || 0, sql: fullSql };
 }
 

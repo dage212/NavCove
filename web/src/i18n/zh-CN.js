@@ -203,6 +203,7 @@ export default {
     cancelAdd: '放弃新增',
     confirm: '确认',
     noPk: '⚠ 该表无主键，无法进行单行编辑 / 新增 / 删除',
+    noPkHint: '该表无主键：按整行匹配定位，重复数据只改/删其中一行',
     clickView: '点击单元格可查看内容',
     clickEdit: '点击单元格即可编辑；新增行直接填入后点「确认」',
     total: '共 {n} 条记录',

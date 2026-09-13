@@ -25,7 +25,7 @@
         size="small"
         type="success"
         plain
-        :disabled="!pkColumns.length"
+        :disabled="!canAddRow"
         @click="startNewRow"
       >
         <el-icon><Plus /></el-icon><span style="margin-left:4px">{{ t('table.addRow') }}</span>
@@ -176,7 +176,7 @@
                 <el-icon><Close /></el-icon><span style="margin-left:2px">{{ t('common.cancel') }}</span>
               </el-button>
             </div>
-            <el-button v-else-if="pkColumns.length" text size="small" type="danger" @click="confirmDelete(row, $index)" :title="t('table.deleteRow')">
+            <el-button v-else-if="canDeleteRow" text size="small" type="danger" @click="confirmDelete(row, $index)" :title="t('table.deleteRow')">
               <el-icon><Delete /></el-icon>
             </el-button>
           </template>
@@ -184,7 +184,8 @@
       </el-table>
     </div>
     <div v-if="isEditable" class="table-footer">
-      <span v-if="!pkColumns.length" style="color:#e6a23c">{{ t('table.noPk') }}</span>
+      <span v-if="!pkColumns.length && canAddRow && !isRedis" style="color:#e6a23c">{{ t('table.noPkHint') }}</span>
+      <span v-else-if="!pkColumns.length" style="color:#e6a23c">{{ t('table.noPk') }}</span>
       <span v-else style="color:var(--c-text-3)">{{ t('table.clickEdit') }}</span>
       <span style="margin-left:auto;color:var(--c-text-3)">{{ t('table.total', { n: total }) }}{{ tab.kind === 'table' ? t('table.pageOf', { page, pages: totalPages }) : '' }}</span>
     </div>
@@ -542,11 +543,31 @@ function canEdit(row, col) {
     if (props.tab.redisType === 'string' && col === 'field') return false;
     return true;
   }
-  if (!pkColumns.value.length) return false;
   if (row._isNew) return true;
-  // 主键也允许查看但不允许修改
   if (isPk(col)) return false;
-  return true;
+  if (pkColumns.value.length) return true;
+  return props.tab.kind === 'table' && columns.value.length > 0;
+}
+
+const canAddRow = computed(() => {
+  if (isRedis.value) return pkColumns.value.length > 0;
+  if (pkColumns.value.length) return true;
+  return props.tab.kind === 'table' && columns.value.length > 0;
+});
+const canDeleteRow = computed(() => canAddRow.value);
+
+function rowLocator(row) {
+  if (pkColumns.value.length) {
+    const pk = {};
+    pkColumns.value.forEach((c) => { pk[c] = row[c]; });
+    return pk;
+  }
+  const loc = {};
+  columns.value.forEach((c) => {
+    if (c === '_isNew') return;
+    loc[c] = row[c];
+  });
+  return loc;
 }
 
 function isEditingCell(row, col) {
@@ -631,9 +652,8 @@ function confirmEdit() {
     editDirty.value = false;
     return;
   }
-  // 正常行：单条 update
-  const pk = {};
-  pkColumns.value.forEach(c => { pk[c] = row[c]; });
+  // 正常行：单条 update（无主键时按整行当前值定位）
+  const pk = rowLocator(row);
   const values = { [col]: normalized };
   // 临时标一下状态，避免重复提交
   editingCell.value.submitting = true;
@@ -659,7 +679,7 @@ function startNewRow() {
     ElMessage.warning(t('table.useNewKey'));
     return;
   }
-  if (!pkColumns.value.length) {
+  if (!isRedis.value && !canAddRow.value) {
     ElMessage.warning(t('table.noPkAdd'));
     return;
   }
@@ -722,14 +742,13 @@ async function confirmNewRow() {
 
 // --- 删除行 ---
 async function confirmDelete(row, index) {
-  if (!pkColumns.value.length) { ElMessage.warning(t('table.noPkDelete')); return; }
   if (row._isNew) {
     newRow.value = null;
     return;
   }
-  const pk = {};
-  pkColumns.value.forEach(c => { pk[c] = row[c]; });
-  const pkShow = pkColumns.value.map(c => `${c}=${row[c]}`).join(', ');
+  if (!canDeleteRow.value) { ElMessage.warning(t('table.noPkDelete')); return; }
+  const pk = rowLocator(row);
+  const pkShow = Object.keys(pk).map((c) => `${c}=${row[c]}`).join(', ');
   try {
     await ElMessageBox.confirm(t('table.deleteConfirm', { pk: pkShow }), t('table.deleteTitle'), {
       type: 'warning',
