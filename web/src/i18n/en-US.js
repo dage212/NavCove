@@ -107,6 +107,8 @@ export default {
   },
   result: {
     title: 'Result',
+    hideEditor: 'Hide editor',
+    showEditor: 'Show editor',
     emptySql: 'Run SQL or pick a table on the left',
     emptyRedis: 'Run a command or pick a key on the left',
     noDbTitle: 'No database selected',

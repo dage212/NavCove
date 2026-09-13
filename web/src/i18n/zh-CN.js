@@ -107,6 +107,8 @@ export default {
   },
   result: {
     title: '结果',
+    hideEditor: '隐藏编辑器',
+    showEditor: '显示编辑器',
     emptySql: '执行 SQL 或选择左侧表查看数据',
     emptyRedis: '执行命令或选择左侧 key 查看数据',
     noDbTitle: '未选择数据库',

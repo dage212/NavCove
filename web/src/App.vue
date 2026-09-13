@@ -147,7 +147,7 @@
       <!-- 右侧主区 -->
       <main class="main-area">
         <!-- SQL 编辑器 -->
-        <div class="editor-pane">
+        <div class="editor-pane" v-show="!editorCollapsed">
           <div class="editor-head">
             <span class="label">{{ isRedis ? t('editor.command') : t('editor.sql') }}</span>
             <el-select
@@ -177,6 +177,7 @@
 
         <!-- 编辑器/结果分隔拖动条 -->
         <div
+          v-show="!editorCollapsed"
           class="resizer resizer-y"
           :class="{ active: editorResizing }"
           @mousedown="onEditorResizeStart"
@@ -185,6 +186,18 @@
         <!-- 结果区 -->
         <div class="result-pane">
           <div class="result-head">
+            <el-button
+              text
+              size="small"
+              class="editor-fold-btn"
+              :title="editorCollapsed ? t('result.showEditor') : t('result.hideEditor')"
+              @click="toggleEditor"
+            >
+              <el-icon>
+                <ArrowUp v-if="!editorCollapsed" />
+                <ArrowDown v-else />
+              </el-icon>
+            </el-button>
             <span class="label">{{ t('result.title') }}</span>
             <span v-if="resultMeta" class="meta">{{ resultMeta }}</span>
             <div class="spacer"></div>
@@ -568,8 +581,16 @@ const loading = ref(false);
 // 可拖动分割条：侧栏宽度 & 编辑器高度
 const sidebarWidth = ref(272);
 const editorHeight = ref(220);
+const editorCollapsed = ref(false);
 const sidebarResizing = ref(false);
 const editorResizing = ref(false);
+
+function toggleEditor() {
+  editorCollapsed.value = !editorCollapsed.value;
+  if (!editorCollapsed.value) {
+    nextTick(() => { if (cmInstance) cmInstance.refresh(); });
+  }
+}
 
 function onSidebarResizeStart(e) {
   if (sidebarCollapsed.value) return;
@@ -596,6 +617,7 @@ function onSidebarResizeStart(e) {
 }
 
 function onEditorResizeStart(e) {
+  if (editorCollapsed.value) return;
   e.preventDefault();
   const startY = e.clientY;
   const startH = editorHeight.value;
