@@ -100,8 +100,8 @@ export default {
     format: '美化',
     clear: '清空',
     run: '执行',
-    hintSql: '-- 在此输入 SQL 语句，Ctrl+Enter 执行\n',
-    hintRedis: '# 输入 Redis 命令，Ctrl+Enter 执行\n',
+    hintSql: '-- 在此输入 SQL，Ctrl+Enter 执行，Ctrl+Space 补全\n',
+    hintRedis: '# 输入 Redis 命令，Ctrl+Enter 执行，Ctrl+Space 补全\n',
     redisNoFormat: 'Redis 命令无需美化',
     formatted: '已美化'
   },

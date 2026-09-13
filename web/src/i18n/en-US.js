@@ -100,8 +100,8 @@ export default {
     format: 'Format',
     clear: 'Clear',
     run: 'Run',
-    hintSql: '-- Enter SQL here, Ctrl+Enter to run\n',
-    hintRedis: '# Enter a Redis command, Ctrl+Enter to run\n',
+    hintSql: '-- Enter SQL here, Ctrl+Enter to run, Ctrl+Space to autocomplete\n',
+    hintRedis: '# Enter a Redis command, Ctrl+Enter to run, Ctrl+Space to autocomplete\n',
     redisNoFormat: 'Redis commands do not need formatting',
     formatted: 'Formatted'
   },

@@ -486,3 +486,21 @@ body {
   .login-left { display: none; }
   .login-right { width: 100%; }
 }
+
+.CodeMirror-hints {
+  z-index: 30 !important;
+  max-height: 240px;
+  border: 1px solid var(--c-border, #E5E7EB);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+.CodeMirror-hint {
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+.CodeMirror-hint-active {
+  background: #007AFF !important;
+  color: #fff !important;
+}

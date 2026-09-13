@@ -677,18 +677,245 @@ function initEditor() {
     extraKeys: {
       'Ctrl-Enter': () => runSql(),
       'Cmd-Enter': () => runSql(),
-      'Ctrl-Space': 'autocomplete',
+      'Ctrl-Space': () => showEditorHint(cmInstance),
+      'Cmd-Space': () => showEditorHint(cmInstance),
       'Tab': (cm) => {
         if (cm.somethingSelected()) cm.indentSelection('add');
         else cm.replaceSelection('  ', 'end');
       },
       'Ctrl-/': toggleSqlComment,
       'Cmd-/': toggleSqlComment
+    },
+    hintOptions: {
+      completeSingle: false,
+      tables: {}
     }
   });
+  cmInstance.on('inputRead', onEditorInput);
   cmInstance.setValue(editorHint(connection.value));
+  refreshSqlHintSchema();
   // 确保正确计算尺寸（异步渲染场景下 fromTextArea 后可能高度为 0）
   setTimeout(() => { try { cmInstance && cmInstance.refresh(); } catch (e) {} }, 0);
+}
+
+const sqlHintCache = new Map();
+let sqlHintTimer = null;
+
+function sqlHintCacheKey() {
+  const conn = connection.value;
+  if (!conn || !conn.id || !currentDb.value) return '';
+  return `${conn.id}:${currentDb.value}`;
+}
+
+function applySqlHintOptions() {
+  if (!cmInstance) return;
+  const cached = sqlHintCache.get(sqlHintCacheKey()) || {};
+  cmInstance.setOption('hintOptions', {
+    completeSingle: false,
+    defaultTable: currentTable.value || undefined,
+    tables: cached
+  });
+}
+
+async function refreshSqlHintSchema() {
+  applySqlHintOptions();
+  const conn = connection.value;
+  if (!cmInstance || !conn || !currentDb.value) return;
+  if (conn.type === 'redis') {
+    await refreshRedisHintKeys();
+    return;
+  }
+  const key = sqlHintCacheKey();
+  try {
+    const tables = await api.listTables(conn.id, currentDb.value);
+    if (sqlHintCacheKey() !== key) return;
+    const prev = sqlHintCache.get(key) || {};
+    const next = {};
+    for (const t of tables || []) {
+      const name = t && typeof t === 'object' ? t.name : t;
+      if (!name) continue;
+      next[name] = Array.isArray(prev[name]) ? prev[name] : [];
+    }
+    sqlHintCache.set(key, next);
+    applySqlHintOptions();
+    if (currentTable.value) ensureTableColumns(currentTable.value);
+  } catch (e) {}
+}
+
+const REDIS_COMMANDS = [
+  'GET', 'SET', 'MGET', 'MSET', 'DEL', 'EXISTS', 'TYPE', 'TTL', 'PTTL', 'EXPIRE', 'PERSIST',
+  'KEYS', 'SCAN', 'INCR', 'INCRBY', 'DECR', 'DECRBY', 'APPEND', 'STRLEN', 'GETSET',
+  'HGET', 'HSET', 'HMGET', 'HGETALL', 'HDEL', 'HKEYS', 'HVALS', 'HEXISTS', 'HLEN', 'HINCRBY',
+  'LPUSH', 'RPUSH', 'LPOP', 'RPOP', 'LRANGE', 'LLEN', 'LINDEX', 'LSET', 'LREM', 'LINSERT', 'LTRIM',
+  'SADD', 'SREM', 'SMEMBERS', 'SCARD', 'SISMEMBER', 'SINTER', 'SUNION', 'SDIFF', 'SPOP',
+  'ZADD', 'ZREM', 'ZRANGE', 'ZREVRANGE', 'ZRANK', 'ZSCORE', 'ZCARD', 'ZINCRBY', 'ZRANGEBYSCORE',
+  'XADD', 'XRANGE', 'XLEN', 'XREAD', 'XDEL',
+  'SELECT', 'PING', 'INFO', 'DBSIZE', 'FLUSHDB', 'RENAME', 'RENAMENX', 'ECHO'
+];
+const redisHintCache = new Map();
+const redisHintDetail = new Map();
+const redisHintDetailPending = new Map();
+
+const REDIS_FIELD_CMDS = new Set(['HGET', 'HSET', 'HMGET', 'HDEL', 'HEXISTS', 'HINCRBY']);
+const REDIS_INDEX_CMDS = new Set(['LINDEX', 'LSET', 'LRANGE', 'LTRIM']);
+const REDIS_MEMBER_CMDS = new Set(['SISMEMBER', 'SREM', 'ZSCORE', 'ZRANK', 'ZREVRANK', 'ZREM']);
+
+async function refreshRedisHintKeys() {
+  const conn = connection.value;
+  const key = sqlHintCacheKey();
+  if (!conn || !key) return;
+  try {
+    const tables = await api.listTables(conn.id, currentDb.value);
+    if (sqlHintCacheKey() !== key) return;
+    redisHintCache.set(key, (tables || []).map((t) => (t && typeof t === 'object' ? t.name : t)).filter(Boolean));
+    for (const k of [...redisHintDetail.keys()]) {
+      if (String(k).startsWith(key + '::')) redisHintDetail.delete(k);
+    }
+  } catch (e) {}
+}
+
+function tokenizeRedisLine(before) {
+  const endsWithSpace = /\s$/.test(before);
+  const tokens = [];
+  const re = /[^\s"]+|"[^"]*"/g;
+  let m;
+  while ((m = re.exec(before))) tokens.push(m[0].replace(/^"|"$/g, ''));
+  if (!before.trim()) return [''];
+  if (endsWithSpace) tokens.push('');
+  return tokens;
+}
+
+function parseRedisHintContext(cm) {
+  const cur = cm.getCursor();
+  const line = cm.getLine(cur.line);
+  const before = line.slice(0, cur.ch);
+  const tokens = tokenizeRedisLine(before);
+  const word = tokens[tokens.length - 1] || '';
+  const start = cur.ch - word.length;
+  const cmd = String(tokens[0] || '').toUpperCase();
+  const redisKey = tokens[1] || '';
+  const argIndex = Math.max(0, tokens.length - 1);
+  return { word, start, cmd, redisKey, argIndex };
+}
+
+async function ensureRedisKeyHint(redisKey) {
+  const conn = connection.value;
+  const dbKey = sqlHintCacheKey();
+  if (!conn || !dbKey || !redisKey) return { type: '', items: [] };
+  const cacheKey = `${dbKey}::${redisKey}`;
+  if (redisHintDetail.has(cacheKey)) return redisHintDetail.get(cacheKey);
+  if (redisHintDetailPending.has(cacheKey)) return redisHintDetailPending.get(cacheKey);
+  const pending = (async () => {
+    try {
+      const res = await api.tableData(conn.id, currentDb.value, redisKey, { page: 1, size: 200 });
+      const type = res && res.keyType ? String(res.keyType) : '';
+      const rows = (res && res.rows) || [];
+      let items = [];
+      if (type === 'hash') items = rows.map((r) => String(r.field == null ? '' : r.field)).filter(Boolean);
+      else if (type === 'list') {
+        const n = Number(res.total) || rows.length;
+        items = [];
+        for (let i = 0; i < Math.min(n, 80); i++) items.push(String(i));
+        if (n > 0) items.push('-1');
+      } else if (type === 'set') items = rows.map((r) => String(r.value == null ? '' : r.value)).filter(Boolean);
+      else if (type === 'zset') items = rows.map((r) => String(r.member == null ? '' : r.member)).filter(Boolean);
+      const detail = { type, items: items.slice(0, 80) };
+      redisHintDetail.set(cacheKey, detail);
+      return detail;
+    } catch (e) {
+      const empty = { type: '', items: [] };
+      redisHintDetail.set(cacheKey, empty);
+      return empty;
+    }
+  })();
+  redisHintDetailPending.set(cacheKey, pending);
+  try { return await pending; } finally { redisHintDetailPending.delete(cacheKey); }
+}
+
+function redisSecondLevelItems(ctx) {
+  if (!ctx.redisKey || ctx.argIndex < 2) return null;
+  const detail = redisHintDetail.get(`${sqlHintCacheKey()}::${ctx.redisKey}`);
+  if (!detail || !detail.type) return [];
+  if (REDIS_FIELD_CMDS.has(ctx.cmd) && detail.type === 'hash') return detail.items;
+  if (REDIS_INDEX_CMDS.has(ctx.cmd) && detail.type === 'list' && (ctx.argIndex === 2 || ctx.argIndex === 3)) return detail.items;
+  if (REDIS_MEMBER_CMDS.has(ctx.cmd) && (detail.type === 'set' || detail.type === 'zset')) return detail.items;
+  return null;
+}
+
+function redisHint(cm) {
+  const cur = cm.getCursor();
+  const ctx = parseRedisHintContext(cm);
+  const q = ctx.word;
+  let list;
+  if (ctx.argIndex <= 0) {
+    const cmdQ = q.toUpperCase();
+    list = REDIS_COMMANDS.filter((c) => c.startsWith(cmdQ));
+  } else if (ctx.argIndex === 1) {
+    const keys = redisHintCache.get(sqlHintCacheKey()) || [];
+    const kq = q.toLowerCase();
+    list = keys.filter((k) => !kq || String(k).toLowerCase().includes(kq)).slice(0, 80);
+  } else {
+    const items = redisSecondLevelItems(ctx);
+    if (!items) list = [];
+    else {
+      const kq = q.toLowerCase();
+      list = items.filter((item) => !kq || String(item).toLowerCase().includes(kq));
+    }
+  }
+  return {
+    list,
+    from: CodeMirror.Pos(cur.line, ctx.start),
+    to: cur
+  };
+}
+
+async function ensureTableColumns(table) {
+  const conn = connection.value;
+  const key = sqlHintCacheKey();
+  if (!conn || conn.type === 'redis' || !key || !table) return;
+  let schema = sqlHintCache.get(key);
+  if (!schema) {
+    schema = {};
+    sqlHintCache.set(key, schema);
+  }
+  if (Array.isArray(schema[table]) && schema[table].length) return;
+  try {
+    const cols = await api.tableColumns(conn.id, currentDb.value, table);
+    if (sqlHintCacheKey() !== key) return;
+    schema[table] = (cols || []).map((c) => c.Field || c.name || c).filter(Boolean);
+    applySqlHintOptions();
+  } catch (e) {}
+}
+
+function tableNameBeforeDot(cm) {
+  const cur = cm.getCursor();
+  const before = cm.getLine(cur.line).slice(0, cur.ch);
+  const m = before.match(/([`"]?)([A-Za-z_][A-Za-z0-9_]*)\1\.$/);
+  return m ? m[2] : '';
+}
+
+async function showEditorHint(cm) {
+  if (!cm) return;
+  if (isRedis.value) {
+    const ctx = parseRedisHintContext(cm);
+    if (ctx.argIndex >= 2 && ctx.redisKey) await ensureRedisKeyHint(ctx.redisKey);
+    if (cmInstance) cm.showHint({ completeSingle: false, hint: redisHint });
+    return;
+  }
+  const table = tableNameBeforeDot(cm);
+  if (table) ensureTableColumns(table);
+  cm.showHint({ completeSingle: false, hint: CodeMirror.hint.sql });
+}
+
+function onEditorInput(cm, change) {
+  if (change.origin !== '+input') return;
+  const typed = (change.text || []).join('');
+  if (!typed) return;
+  if (isRedis.value) {
+    if (typed !== ' ' && !/[A-Za-z0-9_.:*`-]/.test(typed)) return;
+  } else if (!/[A-Za-z0-9_.`]/.test(typed)) return;
+  clearTimeout(sqlHintTimer);
+  sqlHintTimer = setTimeout(() => showEditorHint(cm), 120);
 }
 
 // 登录状态变化时初始化编辑器（loggedIn true → DOM 渲染 textarea → nextTick 后初始化）
@@ -713,6 +940,8 @@ watch(locale, () => {
   const hints = [zhCN.editor.hintSql, zhCN.editor.hintRedis, enUS.editor.hintSql, enUS.editor.hintRedis];
   if (hints.includes(cur)) cmInstance.setValue(editorHint(connection.value));
 });
+watch([currentDb, activeConnId], () => { refreshSqlHintSchema(); });
+watch(currentTable, (name) => { if (name) ensureTableColumns(name); });
 
 function openConnDialog() { connDialogVisible.value = true; }
 
