@@ -2,14 +2,42 @@
 
 # NavCove — Cross-platform Database Management Tool
 
-A Navicat-like desktop database manager, packaged with Electron. It supports MySQL connection management, SQL editing and execution, visual table CRUD, CSV/SQL import and export, and operation-log auditing.
+A Navicat-like desktop database manager, packaged with Electron. It supports **MySQL** and **Redis** in the same window: multi-connection tabs, SQL / Redis command editing, visual table CRUD (including tables without a primary key), foreign-key relation diagrams, CSV/SQL import and export, and an operation-log audit trail. The UI is available in **English** and **Simplified Chinese**.
+
+Default login: `admin` / `123456`.
+
+## Screenshots
+
+### Sign in
+
+Switch language on the login page, then sign in.
+
+![Sign in](./navcode_login.png)
+
+### Workspace
+
+Connection tabs, schema tree, SQL editor, and an editable result grid. Open several tables at once; the tab label is `database.table`.
+
+![Workspace](./navcat_inner.png)
+
+### Table relations
+
+Right-click a table → **View table relations**. The diagram lays out foreign keys field-to-field; drag empty space to pan, drag a card to move a table.
+
+![Table relations](./navcat_relation.png)
+
+### Activity log
+
+Every SQL / Redis command is recorded. Filter by date, user, and statement type.
+
+![Activity log](./navcat_log.png)
 
 ## Tech Stack
 
 - **Desktop**: Electron + electron-builder (native macOS traffic lights / custom window controls on Windows)
 - **Frontend**: Vue 3 + Element Plus + Vite + CodeMirror 5 (SQL highlighting / autocomplete / comment toggle)
-- **Backend**: Node.js + Koa + mysql2 + better-sqlite3
-- **Databases**: MySQL (business data) + SQLite (users / connections / operation-log metadata)
+- **Backend**: Node.js + Koa + mysql2 + ioredis + better-sqlite3
+- **Databases**: MySQL / Redis (business data) + SQLite (users / connections / operation-log metadata)
 
 ## Project Structure
 
@@ -21,8 +49,9 @@ NavCove/
 │   ├── app.js                   # Entry (CORS / static / SPA fallback / error handling)
 │   ├── config.js                # Default connection config
 │   ├── db/sqlite.js             # SQLite: users / connections / operation_log
-│   ├── db/pool.js               # MySQL pool manager (cached by connection ID)
-│   ├── services/mysqlService.js # MySQL operations (query / CRUD / DDL / CSV·SQL I/O)
+│   ├── db/pool.js               # MySQL / Redis pool manager (cached by connection ID)
+│   ├── services/mysqlService.js # MySQL operations (query / CRUD / DDL / relations / CSV·SQL I/O)
+│   ├── services/redisService.js  # Redis keys / commands
 │   ├── services/uploadService.js# Chunked CSV upload / resume / merge
 │   └── routes/index.js          # API routes + operation logging
 ├── web/                         # Vue frontend
@@ -36,6 +65,7 @@ NavCove/
 │   │   │   ├── ExportSqlDialog.vue   # SQL export dialog
 │   │   │   ├── ResultTable.vue       # Result grid (edit / add-delete rows / export)
 │   │   │   ├── StructureView.vue     # Table structure view
+│   │   │   ├── RelationView.vue       # Table relation diagram (foreign keys)
 │   │   │   └── OperationLog.vue      # Operation log tab
 │   │   └── styles/main.css     # Global styles (iOS blue theme)
 │   └── vite.config.js          # Dev proxy /api -> :3000
@@ -85,12 +115,13 @@ Artifacts are written to `release/`.
 | Module | Description |
 |------|------|
 | Auth | Login / logout (SQLite `users` table + session token) |
-| Connections | Multi-connection tabs (per-tab SQL / results / tree state), test connection, create / close |
-| Schema tree | Lazy-load databases → tables; table nodes show exact row counts (`COUNT(*)`) |
+| Connections | Multi-connection tabs (per-tab SQL / results / tree state), MySQL and Redis side by side, test connection, create / close |
+| Schema tree | Lazy-load databases → tables (or Redis DBs → keys); table nodes show exact row counts (`COUNT(*)`) |
 | SQL editor | CodeMirror 5 highlighting / autocomplete / bracket matching, Ctrl+/ comments, Ctrl+Enter run, database switcher, resizable height |
 | SQL execution | Split statements on `;`, SELECT returns result sets, writes return affected rows, error location |
 | Result grid | Pagination (20/50/100/200), column sort, sticky header + inner scroll, sticky new rows, multiple result tabs |
-| Table editing | Inline edit, insert row, delete row, batch save (transaction); SELECT results are editable too |
+| Table editing | Inline edit, insert row, delete row, batch save (transaction); SELECT results are editable; tables without a primary key match the whole row |
+| Table relations | Foreign-key ER diagram: pan the canvas, drag tables, lines attach to fields; incoming / outgoing FK tables below |
 | CSV import | Chunked upload + resume + merge; INSERT append / REPLACE overwrite; auto-convert nonstandard dates |
 | CSV export | Export table data or query results (streaming, UTF-8 BOM, Excel-friendly) |
 | SQL export | Full table `CREATE TABLE` + `INSERT`, or export query results as `INSERT` |
@@ -98,7 +129,7 @@ Artifacts are written to `release/`.
 | DDL | Create/drop/truncate/copy/rename tables; create/drop databases; change charset (with confirm) |
 | Table structure | View columns / types / indexes / DDL |
 | Operation log | Records every SQL action (user / time / type / full SQL / affected rows / status); filter by date / user / SQL type |
-| Layout | Draggable sidebar width, draggable editor/result height, collapsible sidebar |
+| Layout | Draggable sidebar width, draggable editor/result height, collapsible sidebar; English / 简体中文 |
 | Platforms | Native macOS traffic lights, custom window controls on Windows/Linux, iOS blue theme |
 
 ## Default Connection
